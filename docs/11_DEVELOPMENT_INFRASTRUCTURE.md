@@ -29,40 +29,65 @@ aegishealth-kbqa/
 │       ├── etl_pipeline.py
 │       └── load_to_neo4j.py
 │
-├── backend/                        # FastAPI Backend
+├── ai-engine/                      # 🧠 AI ENGINE — Tầng AI (xem Sơ đồ 1, Section 2.4 trong 02_SYSTEM_ARCHITECTURE.md)
+│   ├── __init__.py
+│   ├── config.py                   # AI-specific config (model name, timeout, etc.)
+│   ├── prompts/                    # System Prompts (versioned)
+│   │   ├── text_to_cypher.txt      # System prompt — Bước 1: Generate (NL → Cypher)
+│   │   └── data_to_text.txt        # System prompt — Bước 3: Synthesize (Data → NL)
+│   ├── services/                   # AI core services
+│   │   ├── __init__.py
+│   │   ├── llm_service.py          # SLM interaction (Ollama/vLLM — OpenAI-compatible API)
+│   │   │                           #   → Text-to-Cypher (Generate Phase)
+│   │   │                           #   → Data-to-Text  (Synthesize Phase)
+│   │   └── intent_classifier.py    # Intent Classifier & Response Typer
+│   │                               #   → Phân loại response_type: table | text | warning
+│   ├── utils/                      # AI utilities
+│   │   ├── __init__.py
+│   │   ├── cypher_validator.py     # Cypher syntax checker & schema validator
+│   │   └── sanitizer.py           # Cypher sanitization (chặn DELETE/DROP/MERGE write)
+│   ├── eval/                       # Evaluation & Benchmarking
+│   │   ├── golden_test_set.json    # 50 cặp (question, expected_cypher) benchmark
+│   │   ├── eval_golden_test.py     # Script chạy benchmark tự động
+│   │   └── test_prompt.py          # Script test prompt thủ công
+│   └── tests/                      # Unit tests cho AI Engine
+│       ├── __init__.py
+│       ├── test_llm_service.py
+│       ├── test_intent_classifier.py
+│       ├── test_cypher_validator.py
+│       └── test_pipeline.py
+│
+├── backend/                        # ⚙️ BACKEND MIDDLEWARE — FastAPI (xem Sơ đồ 1, Section 3.2 trong 02_SYSTEM_ARCHITECTURE.md)
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── main.py                 # FastAPI entry point
-│   │   ├── config.py               # Environment configuration
-│   │   ├── routers/
+│   │   ├── config.py               # Environment configuration (DB, CORS, etc.)
+│   │   ├── routers/                # Request Router & Validator
 │   │   │   ├── __init__.py
-│   │   │   └── query.py            # /api/v1/query endpoint
+│   │   │   ├── query.py            # POST /api/v1/query — điều phối pipeline
+│   │   │   ├── health.py           # GET  /api/v1/health
+│   │   │   └── schema.py           # GET  /api/v1/schema
 │   │   ├── services/
 │   │   │   ├── __init__.py
-│   │   │   ├── llm_service.py      # LLM interaction (Ollama/vLLM)
-│   │   │   ├── graph_service.py    # Neo4j AuraDB connection
-│   │   │   └── pipeline.py         # Agent orchestrator
-│   │   ├── models/
-│   │   │   ├── __init__.py
-│   │   │   ├── request.py          # Pydantic request models
-│   │   │   └── response.py         # Pydantic response models
-│   │   ├── prompts/
-│   │   │   ├── text_to_cypher.txt  # System prompt — Step 1
-│   │   │   └── data_to_text.txt    # System prompt — Step 3
-│   │   └── utils/
+│   │   │   ├── pipeline.py         # Query Pipeline Orchestrator
+│   │   │   │                       #   → Điều phối: AI Engine ↔ Data Layer
+│   │   │   │                       #   → Retry logic, fallback, error routing
+│   │   │   └── graph_service.py    # 🗄️ DATA LAYER bridge — Neo4j AuraDB
+│   │   │                           #   → Kết nối neo4j+s://, execute Cypher, connection pool
+│   │   └── models/
 │   │       ├── __init__.py
-│   │       ├── cypher_validator.py # Cypher syntax checker
-│   │       └── sanitizer.py       # Input/Cypher sanitization
+│   │       ├── request.py          # Pydantic request models (QueryRequest)
+│   │       └── response.py         # Pydantic response models (QueryResponse)
 │   ├── tests/
 │   │   ├── __init__.py
 │   │   ├── test_query.py
-│   │   ├── test_llm_service.py
-│   │   └── golden_test_set.json    # Benchmark test data
+│   │   ├── test_pipeline.py
+│   │   └── test_graph_service.py
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example
 │
-├── web-client/                     # ReactJS Web Application
+├── web-client/                     # 🌐 ReactJS Web Application
 │   ├── public/
 │   ├── src/
 │   │   ├── components/
@@ -76,7 +101,7 @@ aegishealth-kbqa/
 │   ├── package.json
 │   └── Dockerfile
 │
-├── mobile-client/                  # Flutter Mobile Application
+├── mobile-client/                  # 📱 Flutter Mobile Application
 │   ├── lib/
 │   │   ├── screens/
 │   │   ├── widgets/
@@ -91,10 +116,20 @@ aegishealth-kbqa/
 │
 ├── .gitignore
 ├── .env.example                    # Template biến môi trường
-├── docker-compose.yml              # Orchestrate backend + web
+├── docker-compose.yml              # Orchestrate backend + web + ai-engine
 ├── README.md                       # Hướng dẫn nhanh
 └── LICENSE
 ```
+
+> **Lưu ý kiến trúc — Mapping 4 tầng**:
+> | Tầng trong `02_SYSTEM_ARCHITECTURE.md` | Folder tương ứng | Ghi chú |
+> |---|---|---|
+> | 🖥️ **CLIENT LAYER** | `web-client/` + `mobile-client/` | React SPA + Flutter App |
+> | ⚙️ **BACKEND MIDDLEWARE** | `backend/` | FastAPI Gateway + Pipeline Orchestrator + Request Router |
+> | 🧠 **AI ENGINE** | `ai-engine/` | LLM Service (Text-to-Cypher, Data-to-Text) + Intent Classifier |
+> | 🗄️ **DATA LAYER** | `data/` (ETL) + `backend/app/services/graph_service.py` (runtime bridge tới Neo4j AuraDB cloud) |
+>
+> `pipeline.py` nằm trong `backend/` vì theo sơ đồ kiến trúc, **Query Pipeline Orchestrator** thuộc tầng Backend Middleware — nó **điều phối** giữa AI Engine và Data Layer, không phải là thành phần AI thuần túy.
 
 ---
 
