@@ -223,7 +223,76 @@ Output:
 
 ---
 
-## 5. Khả năng Mở rộng AI (Tương lai)
+## 5. So sánh với Baseline (Baseline Comparison)
+
+### 5.1. Các phương pháp đối chứng
+
+| # | Approach | Mô tả | Ưu điểm | Nhược điểm |
+|---|---|---|---|---|
+| B1 | **Keyword Search** | Tìm kiếm từ khóa trực tiếp trên database | Nhanh, đơn giản, deterministic | Không hiểu ngữ nghĩa; không xử lý đồng nghĩa; thất bại với câu hỏi NL |
+| B2 | **Vector RAG** | Embed câu hỏi + tìm kiếm vector tương đồng trên text chunks | Hiểu ngữ nghĩa; linh hoạt | Sai lệch ngữ nghĩa; khó multi-hop; kết quả không deterministic |
+| B3 | **Rule-based Cypher** | Ánh xạ từ khóa → template Cypher cố định (if-else) | Chính xác cho các case được define; không cần LLM | Không mở rộng; mỗi pattern mới = viết thêm rule; không hiểu NL |
+| **Ours** | **GraphRAG (Text-to-Cypher)** | LLM sinh Cypher linh hoạt → truy vấn graph → tổng hợp NL | Chính xác + linh hoạt; multi-hop; deterministic data | Phụ thuộc LLM quality; cần schema design tốt |
+
+### 5.2. Ma trận So sánh Định lượng (Dự kiến)
+
+| Metric | Keyword Search | Vector RAG | Rule-based | **GraphRAG (Ours)** |
+|---|---|---|---|---|
+| **Accuracy** (est.) | ~40% | ~65% | ~90% (limited scope) | **~85%** |
+| **Coverage** (để loại câu hỏi) | Thấp | Cao | Rất thấp | **Cao** |
+| **Latency** (est.) | <100ms | ~1500ms | <100ms | **~2000ms** |
+| **Multi-hop support** | ❌ | ❌ | ❌ | ✅ |
+| **Explainability** | ✅ (exact match) | ❌ (embedding) | ✅ (rule trace) | ✅ (Cypher trace) |
+
+> **Lưu ý**: Các con số trên là **ước lượng** dựa trên phân tích kiến trúc. Sẽ được xác nhận bằng thực nghiệm trong quá trình phát triển.
+
+---
+
+## 6. Phân tích Lỗi (Error Analysis)
+
+### 6.1. Taxonomy lỗi Cypher Generation
+
+| # | Loại lỗi | Mô tả | Ví dụ | Tỷ lệ dự kiến |
+|---|---|---|---|---|
+| E1 | **Wrong Entity** | LLM ánh xạ sai tên thực thể từ NL sang graph | "đau bụng" → `"stomach ache"` thay vì `"abdominal pain"` | ~25% |
+| E2 | **Wrong Relationship** | Dùng sai loại quan hệ | Dùng `HAS_SYMPTOM` khi câu hỏi về thuốc (nên dùng `TREATED_BY`) | ~15% |
+| E3 | **Syntax Error** | Cypher không đúng cú pháp | Thiếu dấu ngoặc, sai keyword | ~10% |
+| E4 | **Out-of-Schema** | Sinh node label hoặc relationship type không tồn tại | `MATCH (d:Disease)-[:CAUSED_BY]->...` (CAUSED_BY không có trong schema) | ~20% |
+| E5 | **Over-simplification** | LLM đơn giản hóa câu hỏi phức tạp, bỏ mất điều kiện | "Bệnh nào có triệu chứng X VÀ Y?" → chỉ query triệu chứng X | ~15% |
+| E6 | **Language Mismatch** | Tên entity trong Cypher không match với dữ liệu trong graph (do khác ngôn ngữ/cách viết) | `{name: "tiểu đường"}` thay vì `{name: "diabetes"}` | ~15% |
+
+### 6.2. Chiến lược Giảm Lỗi
+
+| Lỗi | Chiến lược |
+|---|---|
+| **E1, E6** (Entity mismatch) | Entity linking module; bổ sung bảng mapping NL → graph entity |
+| **E2, E4** (Schema violation) | Schema injection trong prompt; Cypher validator chặn output sai schema |
+| **E3** (Syntax error) | Retry with error feedback (self-correction) |
+| **E5** (Over-simplification) | Chain-of-Thought prompting; thêm few-shot cho câu hỏi multi-condition |
+
+---
+
+## 7. Phân tích Đánh đổi Accuracy vs. Speed
+
+### 7.1. Ma trận Trade-off theo cấu hình Model
+
+| Cấu hình | Accuracy (est.) | Latency (est.) | GPU RAM | Ghi chú |
+|---|---|---|---|---|
+| Llama-3-8B (FP16) | ~87% | ~2000ms | ~16GB | Chất lượng cao nhất, cần GPU mạnh |
+| Llama-3-8B (INT8) | ~85% | ~1200ms | ~8GB | Cân bằng tốt |
+| Llama-3-8B (INT4/GGUF) | ~82% | ~800ms | ~5GB | Chấp nhận được, chạy trên GPU vừa |
+| Qwen-2.5-7B (INT4) | ~83% | ~750ms | ~5GB | Alternative tốt, hỗ trợ tiếng Việt |
+| Phi-3-Mini (INT4) | ~72% | ~400ms | ~3GB | Nhanh nhất, accuracy thấp nhất |
+
+### 7.2. Khuyến nghị
+
+- **Ưu tiên chất lượng** (demo, đánh giá): Llama-3-8B (INT8) — cân bằng tốt nhất.
+- **Ưu tiên tốc độ** (prototype nhanh): Qwen-2.5-7B (INT4) — nhanh và hỗ trợ tiếng Việt tốt.
+- **Tài nguyên rất hạn chế**: Phi-3-Mini (INT4) — chấp nhận accuracy thấp hơn.
+
+---
+
+## 8. Khả năng Mở rộng AI (Tương lai)
 
 | Hướng mở rộng | Mô tả |
 |---|---|

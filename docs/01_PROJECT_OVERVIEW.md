@@ -113,7 +113,47 @@ graph TD
 
 ---
 
-## 5. Tài liệu tham khảo
+## 5. Lý do Sử dụng NLP (Why NLP?)
+
+### 5.1. So sánh giao diện NL vs. Form Search truyền thống
+
+| Khía cạnh | Form Search (dropdown, checkbox) | Giao diện Ngôn ngữ Tự nhiên (NL) |
+|---|---|---|
+| **Trải nghiệm người dùng** | Cứng nhắc, buộc user biết cấu trúc dữ liệu | Tự nhiên, giống hỏi bác sĩ thật |
+| **Câu hỏi phức tạp** | Rất khó — cần nhiều bộ lọc kết hợp | Dễ — diễn đạt bằng ngôn ngữ bình thường |
+| **Đường cong học tập** | Cao — user phải học cách sử dụng | Thấp — ai cũng biết đặt câu hỏi |
+| **Accessibility** | Khó tiếp cận cho người già, kém công nghệ | Thân thiện — giao diện chat quen thuộc |
+
+### 5.2. NLP là cầu nối giữa người dùng và Knowledge Graph
+
+Knowledge Graph lưu trữ dữ liệu y tế ở dạng cấu trúc (Cypher query language), nhưng người dùng cuối không biết Cypher. **NLP đóng vai trò lớp phiên dịch**, cho phép người dùng truy vấn đồ thị bằng ngôn ngữ tự nhiên mà không cần hiểu kỹ thuật bên dưới.
+
+---
+
+## 6. Chỉ số Đo lường (Metrics)
+
+### 6.1. Business Metrics (KPIs)
+
+| Metric | Mục tiêu | Cách đo | Tần suất |
+|---|---|---|---|
+| **Task Completion Rate** | ≥ 80% | % câu hỏi nhận được câu trả lời có nội dung (không phải lỗi/rỗng) | Hàng ngày |
+| **User Satisfaction (CSAT)** | ≥ 4.0 / 5.0 | Feedback widget (thumbs up/down + rating) sau mỗi câu trả lời | Hàng tuần |
+| **Time-to-Answer** | < 5 giây | Thời gian từ khi user gửi đến khi nhận response trên UI | Real-time |
+| **Active Users** (demo period) | ≥ 30 users | Số user unique trong giai đoạn demo/testing | Hàng tuần |
+
+### 6.2. Technical Metrics
+
+| Metric | Mục tiêu | Cách đo | Tần suất |
+|---|---|---|---|
+| **Cypher Generation Accuracy** | ≥ 85% | % Cypher hợp lệ VÀ đúng ngữ nghĩa trên Golden Test Set (50–100 câu) | Mỗi sprint |
+| **End-to-End Latency (P50)** | < 2000ms | Percentile 50 thời gian toàn pipeline | Real-time |
+| **End-to-End Latency (P95)** | < 5000ms | Percentile 95 thời gian toàn pipeline | Real-time |
+| **System Uptime** | ≥ 99% (demo) | Health check endpoint monitoring | Real-time |
+| **Cypher Success Rate** | ≥ 90% | % Cypher thực thi không lỗi trên Neo4j | Hàng ngày |
+
+---
+
+## 7. Tài liệu tham khảo
 
 1. Luo, J., et al. (2023). *ChatKBQA: A Generate-then-Retrieve Framework for Knowledge Base Question Answering with Fine-tuned Large Language Models*. arXiv preprint.
 2. Lewis, P., et al. (2020). *Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks*. NeurIPS.

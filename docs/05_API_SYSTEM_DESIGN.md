@@ -249,3 +249,106 @@ GET /api/v1/schema
 | **Connection Pooling** | Neo4j Python Driver connection pool cho phép tái sử dụng kết nối TLS (`neo4j+s://`) đến AuraDB, giảm overhead handshake |
 | **Response Caching** | Cache kết quả cho các câu hỏi phổ biến (tùy chọn, configurable TTL) |
 | **Timeout Configuration** | Timeout riêng cho mỗi bước: LLM generation (30s), DB query (10s), tổng pipeline (60s) |
+
+---
+
+## 7. Quản lý Phiên bản Model (Model Versioning)
+
+### 7.1. Chiến lược Versioning
+
+| Thành phần | Đánh số phiên bản | Ví dụ | Trigger thay đổi version |
+|---|---|---|---|
+| **Base Model** | Major version | `model-v1` (Llama-3-8B), `model-v2` (Qwen-2.5-7B) | Thay đổi base model hoàn toàn |
+| **Prompt Version** | Minor version | `prompt-v1.0`, `prompt-v1.3` | Cập nhật system prompt (few-shot, schema) |
+| **API Version** | URL prefix | `/api/v1/`, `/api/v2/` | Breaking changes trong request/response format |
+
+### 7.2. Rollback Procedure
+
+```
+1. Phát hiện chất lượng giảm (drift detection / user feedback)
+2. Kiểm tra version hiện tại (model + prompt)
+3. Rollback prompt → version trước (fast rollback, < 1 phút)
+4. Nếu vấn đề từ model: rollback model version (slow, cần restart serving)
+5. Chạy lại Golden Test Set → xác nhận accuracy phục hồi
+```
+
+### 7.3. A/B Testing
+
+Khi deploy model hoặc prompt mới, sử dụng A/B testing:
+- **10% traffic** → model/prompt mới (Canary).
+- **90% traffic** → model/prompt cũ (Stable).
+- So sánh Cypher Success Rate và CSAT giữa 2 nhóm trong 3–7 ngày.
+- Nếu Canary tốt hơn → rollout 100%.
+
+---
+
+## 8. Triển khai Hệ thống (Deployment Environment)
+
+### 8.1. Kiến trúc Triển khai
+
+```mermaid
+graph TB
+    subgraph CLOUD ["☁️ Cloud Services"]
+        AURA["Neo4j AuraDB<br/>(Managed Graph DB)"]
+    end
+
+    subgraph LOCAL ["🖥️ Local / On-premise Server"]
+        DOCKER["Docker Compose"]
+        DOCKER --> BE["Backend Container<br/>FastAPI + Uvicorn"]
+        DOCKER --> WEB["Web Container<br/>React (Nginx)"]
+        LLM["Ollama / vLLM<br/>(GPU Server)"]
+    end
+
+    BE -- "neo4j+s://" --> AURA
+    BE -- "HTTP (OpenAI API)" --> LLM
+    WEB -- "HTTP /api/v1" --> BE
+
+    style CLOUD fill:#e3f2fd,stroke:#1565c0
+    style LOCAL fill:#fff3e0,stroke:#e65100
+```
+
+### 8.2. Yêu cầu Phần cứng Tối thiểu
+
+| Thành phần | Yêu cầu tối thiểu | Khuyến nghị |
+|---|---|---|
+| **Backend (FastAPI)** | 2 CPU, 2GB RAM | 4 CPU, 4GB RAM |
+| **LLM Serving (Ollama)** | GPU 6GB VRAM (INT4) | GPU 12GB+ VRAM (INT8) |
+| **Web Client** | Không cần server mạnh (static files) | Nginx container |
+| **Neo4j AuraDB** | Free Tier (200K nodes) | Professional (nếu mở rộng) |
+
+### 8.3. Scalability Plan
+
+| Giai đoạn | Mô tả | Chiến lược |
+|---|---|---|
+| **MVP (1–50 users)** | Single server, Ollama | Đủ cho demo và đánh giá |
+| **Scale-up (50–200 users)** | GPU mạnh hơn, vLLM | Vertical scaling — nâng cấp phần cứng |
+| **Scale-out (200+ users)** | Load balancer + multi-instance | Horizontal scaling — nhiều backend instances đằng sau Nginx/HAProxy |
+
+---
+
+## 9. Bảo vệ Dữ liệu Cá nhân (Data Privacy & PII Handling)
+
+### 9.1. Rủi ro PII trong câu hỏi
+
+Mặc dù hệ thống không yêu cầu thông tin cá nhân, người dùng có thể **vô tình** nhập PII trong câu hỏi, ví dụ:
+- *"Mẹ tôi tên Nguyễn Thị A, năm nay 65 tuổi, bị tiểu đường..."*
+- *"Số BHYT 123456789, bệnh viện Chợ Rẫy..."*
+
+### 9.2. Chiến lược Xử lý
+
+| Biện pháp | Mô tả |
+|---|---|
+| **PII Detection** | Thêm regex filter cơ bản trước khi xử lý: phát hiện số CMND, số điện thoại, email, tên riêng (nếu khả thi) |
+| **Log Sanitization** | Logs hệ thống chỉ lưu câu hỏi đã được ẩn danh hóa (mask PII) |
+| **No Persistent Storage** | Không lưu câu hỏi gốc của user lên database (chỉ lưu aggregated analytics) |
+| **Local LLM** | Dữ liệu không rời khỏi infrastructure kiểm soát được (xem lý do lựa chọn Local SLM tại `04_AI_MODELS_STRATEGY.md`) |
+| **Disclaimer** | Thông báo cho user: "Vui lòng không nhập thông tin cá nhân nhạy cảm" |
+
+### 9.3. Xử lý Out-of-Domain & Adversarial Input
+
+| Tình huống | Mô tả | Xử lý |
+|---|---|---|
+| **Out-of-domain** | Câu hỏi ngoài phạm vi y tế ("Thời tiết hôm nay?") | LLM + prompt hướng dẫn → trả lời: "Tôi chỉ hỗ trợ câu hỏi y tế" |
+| **Prompt Injection** | User cố gắng override system prompt | Input sanitization + system prompt hardening (role reinforcement) |
+| **Cypher Injection** | User nhập Cypher trực tiếp nhằm phá hoại DB | Cypher sanitization layer chặn mọi lệnh WRITE/DELETE/DROP |
+

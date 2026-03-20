@@ -290,7 +290,41 @@ LIMIT 5;
 
 ---
 
-## 6. Chiến lược Mở rộng Dữ liệu (Tương lai)
+## 6. Hạn chế & Thiên lệch Dữ liệu (Data Limitations & Bias)
+
+### 6.1. Hạn chế Dữ liệu
+
+| Hạn chế | Mô tả | Ảnh hưởng |
+|---|---|---|
+| **Phạm vi hẹp** | Chỉ cover Disease, Symptom, Drug — chưa có Side Effect, Treatment Protocol, Doctor | Hệ thống không trả lời được câu hỏi ngoài 3 entity types |
+| **Chỉ tiếng Anh** | Toàn bộ dữ liệu gốc bằng tiếng Anh | User Việt hỏi tiếng Việt → LLM phải dịch → rủi ro sai entity mapping |
+| **Dữ liệu tĩnh** | Kaggle dataset là snapshot tại thời điểm thu thập, không tự cập nhật | Thuốc mới, phác đồ mới không được phản ánh |
+| **Thiếu quantification** | Quan hệ HAS_SYMPTOM không có trọng số (severity, frequency) | Không phân biệt triệu chứng chính vs. phụ |
+
+### 6.2. Phân tích Thiên lệch (Bias Analysis)
+
+| Loại Bias | Mô tả | Biện pháp giảm thiểu |
+|---|---|---|
+| **Geographic Bias** | Dataset từ Kaggle phản ánh chủ yếu dữ liệu y tế Bắc Mỹ/Châu Âu. Bệnh phổ biến ở Đông Nam Á (sốt xuất huyết, sốt rét) có thể thiếu hoặc ít record | Bổ sung dữ liệu regional trong phiên bản sau; thông báo rõ giới hạn |
+| **Language Bias** | Tên bệnh/triệu chứng/thuốc bằng tiếng Anh → entity linking từ tiếng Việt có thể sai | Xây dựng bảng mapping Việt-Anh cho entities phổ biến |
+| **Prevalence Bias** | Bệnh phổ biến (cảm cúm, tiểu đường) có nhiều record hơn bệnh hiếm → hệ thống "biết" nhiều hơn về bệnh phổ biến | Monitored — track Empty Result Rate theo disease |
+| **Drug Availability Bias** | Thuốc trong dataset có thể không sẵn có ở Việt Nam, hoặc có tên thương mại khác | Bổ sung tên thuốc phổ biến ở VN trong phiên bản sau |
+
+### 6.3. Phân chia Dữ liệu (Data Split)
+
+Mặc dù hệ thống chính **không fine-tune** model (sử dụng prompt engineering), việc phân chia dữ liệu vẫn cần thiết cho mục đích **đánh giá và benchmarking**:
+
+| Tập dữ liệu | Tỷ lệ | Mục đích | Kích thước dự kiến |
+|---|---|---|---|
+| **Golden Test Set** | 100 câu hỏi | Benchmark accuracy cho Cypher generation — chạy định kỳ mỗi sprint | Fixed, manually curated |
+| **Evaluation Set** | 50 câu hỏi | Quick regression test khi thay đổi prompt / model | Fixed, manually curated |
+| **Training Set** (nếu fine-tune) | 80% | Dữ liệu (question, cypher) cho LoRA fine-tuning | ≥ 500 cặp (thu thập dần) |
+| **Validation Set** (nếu fine-tune) | 10% | Chọn hyperparameters, early stopping | ≥ 50 cặp |
+| **Test Set** (nếu fine-tune) | 10% | Đánh giá cuối cùng, không touch trong quá trình train | ≥ 50 cặp |
+
+---
+
+## 7. Chiến lược Mở rộng Dữ liệu (Tương lai)
 
 | Mở rộng | Mô tả |
 |---|---|
