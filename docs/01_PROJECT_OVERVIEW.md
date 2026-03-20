@@ -57,7 +57,7 @@ graph LR
 | Bước | Vai trò | So sánh với RAG truyền thống |
 |---|---|---|
 | **Generate** (Text-to-Cypher) | LLM dịch câu hỏi tiếng Việt/Anh thành câu lệnh Cypher. | RAG: embed câu hỏi thành vector → tìm kiếm tương đồng. |
-| **Retrieve** (Graph Query) | Neo4j thực thi Cypher và trả về kết quả **cấu trúc, xác định**. | RAG: trả về top-k đoạn văn bản *có thể* liên quan. |
+| **Retrieve** (Graph Query) | Neo4j AuraDB thực thi Cypher và trả về kết quả **cấu trúc, xác định**. | RAG: trả về top-k đoạn văn bản *có thể* liên quan. |
 | **Synthesize** (Data-to-Text) | LLM nhận dữ liệu cấu trúc từ DB và tổng hợp thành câu trả lời NL. | RAG: LLM nhận text chunks và *cố gắng tóm tắt*. |
 
 ### 2.3. Ưu điểm cốt lõi so với Vector-based RAG
@@ -118,3 +118,4 @@ graph TD
 1. Luo, J., et al. (2023). *ChatKBQA: A Generate-then-Retrieve Framework for Knowledge Base Question Answering with Fine-tuned Large Language Models*. arXiv preprint.
 2. Lewis, P., et al. (2020). *Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks*. NeurIPS.
 3. Neo4j Documentation. *The Neo4j Graph Database*. https://neo4j.com/docs/
+4. Neo4j AuraDB. *Fully Managed Cloud Graph Database*. https://neo4j.com/cloud/platform/aura-graph-database/

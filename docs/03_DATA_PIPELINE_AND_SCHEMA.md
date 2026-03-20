@@ -43,11 +43,11 @@ flowchart LR
         T2["2. Chuẩn hóa tên thực thể<br/>(lowercase, strip, dedup)"]
         T3["3. Tách quan hệ:<br/>Disease ↔ Symptom<br/>Disease ↔ Drug"]
         T4["4. Tạo unique ID cho mỗi entity"]
-        T5["5. Xuất Cypher LOAD statements<br/>hoặc CSV cho neo4j-admin import"]
+        T5["5. Sinh Cypher statements<br/>& batch load via Python Driver"]
     end
 
-    subgraph LOAD ["📤 LOAD"]
-        NEO["Neo4j Database<br/>Graph Schema"]
+    subgraph LOAD ["📤 LOAD (Cloud)"]
+        NEO["Neo4j AuraDB<br/>Managed Graph Database"]
     end
 
     CSV1 --> T1
@@ -94,16 +94,19 @@ Relationships:
 
 #### Bước 4: Transform — Tạo định danh duy nhất
 
-Mỗi entity được gán một `entity_id` duy nhất (có thể ở dạng incremental integer hoặc UUID) để đảm bảo tính nhất quán khi load vào Neo4j.
+Mỗi entity được gán một `entity_id` duy nhất (có thể ở dạng incremental integer hoặc UUID) để đảm bảo tính nhất quán khi load vào Neo4j AuraDB.
 
-#### Bước 5: Load — Nhập dữ liệu vào Neo4j
+#### Bước 5: Load — Nhập dữ liệu vào Neo4j AuraDB
 
-Hai phương pháp load được hỗ trợ:
+Do sử dụng **Neo4j AuraDB** (dịch vụ managed), việc load dữ liệu được thực hiện qua các phương pháp tương thích cloud:
 
 | Phương pháp | Mô tả | Phù hợp khi |
 |---|---|---|
-| **Cypher LOAD CSV** | Sử dụng lệnh `LOAD CSV` tích hợp của Neo4j để import từ file CSV | Dữ liệu vừa phải (<100K nodes), cần linh hoạt |
-| **neo4j-admin import** | Sử dụng công cụ dòng lệnh cho bulk import | Dữ liệu lớn (>100K nodes), cần tốc độ cao |
+| **Neo4j Python Driver (Batch Cypher)** | Sử dụng Python Driver kết nối đến AuraDB qua `neo4j+s://`, thực thi `MERGE`/`CREATE` statements theo batch (1,000–5,000 records/batch) | ✅ Phương pháp chính — linh hoạt, kiểm soát logic transform trong Python |
+| **Cypher `LOAD CSV` từ URL công khai** | AuraDB hỗ trợ `LOAD CSV FROM 'https://...'` từ file CSV được host trên cloud storage (ví dụ: GitHub raw, Google Cloud Storage) | Dữ liệu tĩnh, cần import nhanh mà không viết code phức tạp |
+
+> [!NOTE]
+> **`neo4j-admin import`** không khả dụng trên AuraDB vì đây là công cụ dòng lệnh yêu cầu truy cập trực tiếp vào server — không áp dụng cho dịch vụ managed cloud.
 
 ---
 

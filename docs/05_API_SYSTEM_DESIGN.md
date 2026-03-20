@@ -182,7 +182,7 @@ graph TD
 | `400` | `INVALID_QUESTION` | Câu hỏi trống hoặc không hợp lệ | *"Vui lòng nhập câu hỏi hợp lệ."* |
 | `422` | `CYPHER_GENERATION_FAILED` | LLM không thể sinh Cypher hợp lệ | *"Xin lỗi, tôi chưa hiểu câu hỏi. Bạn có thể diễn đạt lại được không?"* |
 | `404` | `NO_DATA_FOUND` | Cypher hợp lệ nhưng không có kết quả | *"Không tìm thấy thông tin về chủ đề này trong cơ sở dữ liệu."* |
-| `500` | `DATABASE_ERROR` | Lỗi kết nối hoặc thực thi Neo4j | *"Hệ thống đang gặp sự cố. Vui lòng thử lại sau."* |
+| `500` | `DATABASE_ERROR` | Lỗi kết nối hoặc thực thi Neo4j AuraDB | *"Hệ thống đang gặp sự cố. Vui lòng thử lại sau."* |
 | `503` | `MODEL_UNAVAILABLE` | LLM server không phản hồi | *"Dịch vụ AI tạm thời không khả dụng. Vui lòng thử lại sau."* |
 | `504` | `TIMEOUT` | Vượt quá thời gian cho phép | *"Xử lý mất quá lâu. Vui lòng thử câu hỏi ngắn hơn."* |
 
@@ -239,13 +239,13 @@ GET /api/v1/schema
 | **Input Validation** | Pydantic model validation cho mọi request body, ngăn chặn injection |
 | **Rate Limiting** | Giới hạn số request/phút từ mỗi IP (configurable) |
 | **CORS Configuration** | Chỉ cho phép các origin hợp lệ (web client domain) |
-| **Cypher Sanitization** | Validate Cypher output từ LLM trước khi gửi đến Neo4j, ngăn chặn destructive queries (DELETE, DROP, v.v.) |
+| **Cypher Sanitization** | Validate Cypher output từ LLM trước khi gửi đến Neo4j AuraDB, ngăn chặn destructive queries (DELETE, DROP, v.v.) |
 
 ### 6.2. Cân nhắc Hiệu suất
 
 | Khía cạnh | Chiến lược |
 |---|---|
 | **Async Processing** | FastAPI xử lý request async, không block event loop khi chờ LLM/DB response |
-| **Connection Pooling** | Neo4j Driver connection pool cho phép tái sử dụng kết nối |
+| **Connection Pooling** | Neo4j Python Driver connection pool cho phép tái sử dụng kết nối TLS (`neo4j+s://`) đến AuraDB, giảm overhead handshake |
 | **Response Caching** | Cache kết quả cho các câu hỏi phổ biến (tùy chọn, configurable TTL) |
 | **Timeout Configuration** | Timeout riêng cho mỗi bước: LLM generation (30s), DB query (10s), tổng pipeline (60s) |

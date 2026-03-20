@@ -28,8 +28,8 @@ flowchart TB
         INTENT["Intent Classifier<br/>& Response Typer"]
     end
 
-    subgraph DATA_LAYER ["🗄️ DATA LAYER"]
-        NEO4J["Neo4j<br/>Graph Database"]
+    subgraph DATA_LAYER ["🗄️ DATA LAYER (Cloud)"]
+        NEO4J["Neo4j AuraDB<br/>Managed Graph Database"]
     end
 
     WEB -- "HTTP/JSON" --> API
@@ -65,7 +65,7 @@ sequenceDiagram
     participant C as 🖥️ Client (Web/Mobile)
     participant F as ⚙️ FastAPI Backend
     participant L as 🤖 Local SLM (Ollama/vLLM)
-    participant N as 🗄️ Neo4j
+    participant N as 🗄️ Neo4j AuraDB
 
     U->>C: Nhập câu hỏi NL
     C->>F: POST /api/v1/query {question}
@@ -123,12 +123,12 @@ sequenceDiagram
 
 ### 2.3. Bước 2 — Retrieve: Database Query Execution
 
-**Mục tiêu**: Thực thi câu lệnh Cypher trên Neo4j và nhận kết quả dữ liệu cấu trúc.
+**Mục tiêu**: Thực thi câu lệnh Cypher trên Neo4j AuraDB (cloud) và nhận kết quả dữ liệu cấu trúc.
 
 **Quy trình chi tiết**:
 
 1. **Query Execution**:
-   - Backend sử dụng Neo4j Python Driver để mở session và gửi Cypher query.
+   - Backend sử dụng Neo4j Python Driver để kết nối đến Neo4j AuraDB instance qua giao thức `neo4j+s://` (TLS encrypted) và gửi Cypher query.
    - Truy vấn được thực thi trong read transaction để đảm bảo tính consistency.
 
 2. **Result Processing**:
@@ -144,7 +144,7 @@ sequenceDiagram
 
 ### 2.4. Bước 3 — Synthesize: Data-to-Text & Intent Classification
 
-**Mục tiêu**: Tổng hợp dữ liệu cấu trúc từ Neo4j thành câu trả lời ngôn ngữ tự nhiên, đồng thời phân loại loại phản hồi phù hợp.
+**Mục tiêu**: Tổng hợp dữ liệu cấu trúc từ Neo4j AuraDB thành câu trả lời ngôn ngữ tự nhiên, đồng thời phân loại loại phản hồi phù hợp.
 
 **Quy trình chi tiết**:
 
@@ -169,14 +169,16 @@ sequenceDiagram
 
 ## 3. Vai trò Chi tiết của Từng Thành phần Công nghệ
 
-### 3.1. Neo4j — Graph Database (Tầng Dữ liệu)
+### 3.1. Neo4j AuraDB — Managed Graph Database (Tầng Dữ liệu)
 
 | Khía cạnh | Chi tiết |
 |---|---|
 | **Vai trò** | Lưu trữ đồ thị tri thức y tế; là **Single Source of Truth** cho toàn bộ hệ thống. |
+| **Dịch vụ** | **Neo4j AuraDB** — dịch vụ Graph Database được quản lý hoàn toàn (fully-managed) trên cloud bởi Neo4j, Inc. Loại bỏ gánh nặng vận hành hạ tầng (provisioning, backup, scaling, patching). |
 | **Mô hình dữ liệu** | Property Graph Model — Node (thực thể) và Relationship (quan hệ) đều có thể mang properties. |
 | **Ngôn ngữ truy vấn** | Cypher — ngôn ngữ truy vấn đồ thị khai báo (declarative), trực quan cho pattern matching. |
-| **Lý do lựa chọn** | Phù hợp tự nhiên với dữ liệu y tế (quan hệ Bệnh-Triệu chứng-Thuốc); hiệu suất truy vấn quan hệ vượt trội so với SQL JOIN truyền thống; có cộng đồng và hệ sinh thái mạnh. |
+| **Kết nối** | Backend kết nối qua giao thức `neo4j+s://` (Bolt over TLS), đảm bảo mã hóa end-to-end. Xác thực bằng username/password do AuraDB cung cấp. |
+| **Lý do lựa chọn AuraDB** | (1) **Không cần quản trị DB**: Team tập trung vào phát triển tính năng thay vì vận hành infrastructure. (2) **Free tier khả dụng**: AuraDB Free cung cấp 200K nodes, đủ cho phạm vi dự án. (3) **Bảo mật mặc định**: TLS encryption, IP allowlisting, auto-backup. (4) Phù hợp tự nhiên với dữ liệu y tế (quan hệ Bệnh-Triệu chứng-Thuốc); hiệu suất truy vấn quan hệ vượt trội so với SQL JOIN truyền thống. |
 
 ### 3.2. FastAPI — Backend Middleware (Tầng Điều phối)
 
