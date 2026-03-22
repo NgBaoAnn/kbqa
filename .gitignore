@@ -1,0 +1,38 @@
+# =============================================
+# AegisHealth KBQA — Root .gitignore
+# =============================================
+
+# -- Python --
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# -- Environment / Secrets --
+.env
+backend/.env
+
+# -- IDE --
+.vscode/
+.idea/
+
+# -- OS --
+.DS_Store
+Thumbs.db
+
+# -- Node (web-client) --
+node_modules/
+
+# -- Flutter (mobile-client) --
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# -- Model weights (use Ollama pull) --
+*.bin
+*.gguf
+*.safetensors
