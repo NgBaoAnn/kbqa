@@ -1,395 +1,358 @@
 # 📐 THIẾT KẾ GRAPH SCHEMA — AegisHealth KBQA
 
-> **Phiên bản:** 1.0  
-> **Tác giả:** Đội Data & Graph  
-> **Mục tiêu:** Schema chuẩn, tối ưu truy vấn, sẵn sàng mở rộng
+> **Phiên bản:** 2.0 (VietMedKG-based)  
+> **Tham chiếu:** [VietMedKG Paper — ACM TALLIP 2025](https://doi.org/10.1145/3744740)  
+> **Source:** [github.com/HySonLab/VietMedKG](https://github.com/HySonLab/VietMedKG)  
+> **Mục tiêu:** Schema chuẩn, tối ưu truy vấn, sẵn sàng mở rộng cho KBQA tiếng Việt
 
 ---
 
 ## 1. Nguyên Tắc Thiết Kế
 
-Trước khi đi vào chi tiết, đây là các nguyên tắc mà schema này tuân theo:
-
 | # | Nguyên tắc | Lý do |
 |---|---|---|
-| 1 | **Tên Entity lưu lowercase, chuẩn hóa tiếng Anh** | Tránh trùng lặp do viết hoa/thường. LLM sinh Cypher sẽ nhất quán hơn |
-| 2 | **Mỗi Entity có `name` là UNIQUE constraint** | Ngăn chặn duplicate nodes, cho phép dùng `MERGE` an toàn khi import |
-| 3 | **Tên Relationship viết HOA, dùng dấu gạch dưới** | Chuẩn Neo4j convention: `HAS_SYMPTOM`, `TREATED_BY` |
-| 4 | **Property càng ít càng tốt, nhưng đủ để trả lời câu hỏi** | Schema gọn → LLM dễ học → sinh Cypher chính xác hơn |
-| 5 | **Relationship property cho metadata, không cho dữ liệu chính** | Dữ liệu chính nằm trên Node. Relationship property bổ sung ngữ cảnh |
-| 6 | **Dự phòng mở rộng nhưng không over-engineer** | Chỉ implement cái cần cho v1, nhưng thiết kế sao cho thêm mới dễ dàng |
+| 1 | **Schema dựa trên VietMedKG paper** | Đã được kiểm chứng với 41K nodes, 42K rels, published tại ACM |
+| 2 | **Node Labels = tiếng Anh, Properties = tiếng Anh** | Tránh Unicode issues trong Cypher, dễ làm việc với code |
+| 3 | **Relationship Types dùng UPPER_CASE + dấu gạch dưới** | Chuẩn Neo4j convention, tránh lỗi khi không dùng backtick |
+| 4 | **Mỗi Entity MERGE theo `disease_name`** | VietMedKG star schema: mỗi bệnh có 1 bộ nodes riêng |
+| 5 | **Data tiếng Việt, tên bệnh Capitalize** | Nhất quán với data gốc, hỗ trợ KBQA tiếng Việt |
+| 6 | **Dự phòng mở rộng** — enrich từ ViMedNer, Kaggle... | Chỉ cần THÊM nodes/rels, không SỬA cái cũ |
 
 ---
 
-## 2. Nguồn Dữ Liệu & Mapping
+## 2. Nguồn Dữ Liệu
 
-### 2.1. Từ Kaggle về Graph
+### 2.1. Nguồn chính: VietMedKG `data_translated.csv`
 
-Project sử dụng bộ **Medicine Recommendation System Dataset** trên Kaggle, bao gồm nhiều file CSV:
+| Thuộc tính | Giá trị |
+|---|---|
+| **Nguồn** | [HySonLab/VietMedKG](https://github.com/HySonLab/VietMedKG) |
+| **File** | `data/data_translated.csv` |
+| **Số dòng** | ~8,800 bệnh |
+| **Cột** | 18 cột thông tin y tế tiếng Việt |
+| **Ngôn ngữ** | Tiếng Việt (dịch từ TCM Knowledge Graph) |
 
-| File CSV | Cột chính | Mapping vào Graph |
-|---|---|---|
-| `Training.csv` | `prognosis` + 132 cột symptom (binary 0/1) | `Disease` nodes, `Symptom` nodes, `HAS_SYMPTOM` relationships |
-| `description.csv` | `Disease`, `Description` | Property `description` trên `Disease` node |
-| `medications.csv` | `Disease`, `Medication` | `Drug` nodes, `TREATED_BY` relationships |
-| `Symptom-severity.csv` | `Symptom`, `weight` | Property `severity_weight` trên `HAS_SYMPTOM` relationship |
-| `precautions_df.csv` | `Disease`, `Precaution_1..4` | Property `precautions` trên `Disease` node |
-| `diets.csv` | `Disease`, `Diet` | Property `recommended_diet` trên `Disease` node |
-
-> [!IMPORTANT]
-> Bộ dataset này **giàu hơn nhiều** so với chỉ 2 file. Tận dụng tối đa sẽ tạo Knowledge Graph chất lượng cao hơn.
-
-### 2.2. Ánh Xạ Tổng Thể
+### 2.2. Mapping CSV → Graph
 
 ```
-Training.csv        ─── prognosis ──────────────→ Disease (name)
-                    ─── 132 symptom columns ────→ Symptom (name) + HAS_SYMPTOM
-description.csv     ─── Description ────────────→ Disease (description)
-medications.csv     ─── Medication ─────────────→ Drug (name) + TREATED_BY
-Symptom-severity.csv── weight ──────────────────→ HAS_SYMPTOM (severity_weight)
-precautions_df.csv  ─── Precaution_1..4 ────────→ Disease (precautions)
-diets.csv           ─── Diet ───────────────────→ Disease (recommended_diet)
+data_translated.csv
+├── tên_bệnh ──────────────→ Disease.disease_name
+├── mô_tả_bệnh ────────────→ Disease.disease_description
+├── loại_bệnh ─────────────→ Disease.disease_category
+├── nguyên_nhân ────────────→ Disease.disease_cause
+├── triệu_chứng ───────────→ Symptom.disease_symptom
+├── kiểm_tra ──────────────→ Symptom.check_method
+├── đối_tượng_dễ_mắc_bệnh ─→ Symptom.people_easy_get
+├── phương_pháp ────────────→ Treatment.cure_method
+├── khoa_điều_trị ──────────→ Treatment.cure_department
+├── tỉ_lệ_chữa_khỏi ──────→ Treatment.cure_probability
+├── đề_xuất_thuốc ─────────→ Medicine.drug_recommend
+├── thuốc_phổ_biến ────────→ Medicine.drug_common
+├── thông_tin_thuốc ────────→ Medicine.drug_detail
+├── nên_ăn_thực_phẩm_chứa ─→ Advice.nutrition_do_eat
+├── đề_xuất_món_ăn ────────→ Advice.nutrition_recommend_meal
+├── không_nên_ăn ───────────→ Advice.nutrition_not_eat
+├── cách_phòng_tránh ──────→ Advice.disease_prevention
+└── bệnh_đi_kèm ───────────→ IS_LINKED_WITH relationship
 ```
 
 ---
 
 ## 3. Đặc Tả Chi Tiết Graph Schema
 
-### 3.1. Sơ Đồ Tổng Thể
+### 3.1. Sơ Đồ Tổng Thể (theo Fig. 6 VietMedKG paper)
 
 ```mermaid
 graph LR
-    D["🏥 Disease\n─────────\nname: String ◄ UNIQUE\ndescription: String\nprecautions: List‹String›\nrecommended_diet: List‹String›"]
-    S["🩺 Symptom\n─────────\nname: String ◄ UNIQUE"]
-    DR["💊 Drug\n─────────\nname: String ◄ UNIQUE"]
+    D["🏥 Disease\n─────────\ndisease_name ◄ UNIQUE\ndisease_description\ndisease_category\ndisease_cause"]
+    S["🩺 Symptom\n─────────\ndisease_name ◄ UNIQUE\ndisease_symptom\ncheck_method\npeople_easy_get"]
+    T["💉 Treatment\n─────────\ndisease_name ◄ UNIQUE\ncure_method\ncure_department\ncure_probability"]
+    M["💊 Medicine\n─────────\ndisease_name ◄ UNIQUE\ndrug_detail\ndrug_common\ndrug_recommend"]
+    A["📋 Advice\n─────────\ndisease_name ◄ UNIQUE\nnutrition_do_eat\nnutrition_recommend_meal\nnutrition_not_eat\ndisease_prevention"]
 
-    D -- "HAS_SYMPTOM\n(severity_weight: Integer)" --> S
-    D -- "TREATED_BY" --> DR
+    D -- "HAS_SYMPTOM" --> S
+    D -- "HAS_TREATMENT" --> T
+    D -- "IS_PRESCRIBED" --> M
+    D -- "HAS_ADVICE" --> A
+    D -- "IS_LINKED_WITH" --> D
 
     style D fill:#ffcdd2,stroke:#c62828,color:#000
     style S fill:#bbdefb,stroke:#1565c0,color:#000
-    style DR fill:#c8e6c9,stroke:#2e7d32,color:#000
+    style T fill:#c8e6c9,stroke:#2e7d32,color:#000
+    style M fill:#fff9c4,stroke:#f9a825,color:#000
+    style A fill:#e1bee7,stroke:#6a1b9a,color:#000
 ```
 
 ---
 
-### 3.2. Node: `Disease` (Bệnh)
+### 3.2. Node: `Disease` (Bệnh) — Node trung tâm
 
-| Property | Kiểu | Ràng buộc | Nguồn dữ liệu | Ví dụ |
+| Property | Kiểu | Ràng buộc | Nguồn CSV | Ví dụ |
 |---|---|---|---|---|
-| `name` | `String` | **UNIQUE, NOT NULL** | `Training.csv` → cột `prognosis` | `"diabetes"` |
-| `description` | `String` | Nullable | `description.csv` → cột `Description` | `"A chronic metabolic disease..."` |
-| `precautions` | `List<String>` | Nullable | `precautions_df.csv` → cột `Precaution_1..4` | `["monitor blood sugar", "balanced diet", ...]` |
-| `recommended_diet` | `List<String>` | Nullable | `diets.csv` → cột `Diet` | `["low sugar foods", "high fiber", ...]` |
+| `disease_name` | `String` | **UNIQUE, NOT NULL** | `tên_bệnh` | `"Viêm phổi"` |
+| `disease_description` | `String` | Nullable | `mô_tả_bệnh` | `"Viêm phổi là tình trạng..."` |
+| `disease_category` | `String` | Nullable | `loại_bệnh` | `"[Nội khoa, Y học hô hấp]"` |
+| `disease_cause` | `String` | Nullable | `nguyên_nhân` | `"Vi khuẩn, virus..."` |
 
-**Quyết định thiết kế:**
-
-- **`precautions` là List trên Node, không tách thành Node riêng.** Lý do: Precautions không có quan hệ chia sẻ giữa các bệnh (precaution A chỉ thuộc về bệnh X, không có bệnh Y cũng có precaution A). Nếu tách Node sẽ tạo thêm complexity không cần thiết.
-- **`recommended_diet` tương tự.** Chỉ bổ sung thông tin, không cần truy vấn ngược ("diet nào thuộc bệnh nào?").
-- **`description` là text dài** → lưu trên Node, không phải relationship.
-
-**Câu hỏi mà Node này trả lời được:**
-- "Bệnh tiểu đường là gì?" → `d.description`
-- "Cần phòng ngừa gì cho bệnh X?" → `d.precautions`
-- "Chế độ ăn cho bệnh X?" → `d.recommended_diet`
+**Thiết kế quan trọng:**
+- Disease là **hub node** — mọi node khác đều kết nối qua Disease
+- `disease_name` viết **Capitalize** (ví dụ: `"Viêm phổi"`, không phải `"viêm phổi"`)
 
 ---
 
 ### 3.3. Node: `Symptom` (Triệu chứng)
 
-| Property | Kiểu | Ràng buộc | Nguồn dữ liệu | Ví dụ |
+| Property | Kiểu | Ràng buộc | Nguồn CSV | Ví dụ |
 |---|---|---|---|---|
-| `name` | `String` | **UNIQUE, NOT NULL** | `Training.csv` → tên 132 cột symptom | `"headache"` |
+| `disease_name` | `String` | **UNIQUE** | `tên_bệnh` | `"Viêm phổi"` |
+| `disease_symptom` | `String` | Nullable | `triệu_chứng` | `"['Ho','Sốt','Khó thở']"` |
+| `check_method` | `String` | Nullable | `kiểm_tra` | `"['X-quang phổi','Xét nghiệm máu']"` |
+| `people_easy_get` | `String` | Nullable | `đối_tượng_dễ_mắc_bệnh` | `"Người già, trẻ em"` |
 
-**Quyết định thiết kế:**
-
-- **Symptom cực kỳ đơn giản — chỉ có `name`.** Lý do: trong dataset, triệu chứng chỉ là tên (binary có/không). Không có mô tả hay metadata riêng cho từng triệu chứng.
-- **Tên được chuẩn hóa:** `"skin_rash"` → `"skin rash"` (thay `_` bằng space, lowercase).
-- **Symptom ĐƯỢC CHIA SẺ giữa các Disease** (many-to-many). Đây chính là sức mạnh của graph — headache vừa liên kết flu, vừa liên kết migraine.
-
-**Câu hỏi mà Node này trả lời được:**
-- "Headache là triệu chứng của bệnh gì?" → truy vấn ngược qua `HAS_SYMPTOM`
+> [!NOTE]
+> **Star schema:** Mỗi bệnh có **đúng 1 node Symptom riêng** (không chia sẻ). Triệu chứng lưu dạng text/list trong 1 property. Khác với schema truyền thống (mỗi triệu chứng = 1 node).
 
 ---
 
-### 3.4. Node: `Drug` (Thuốc)
+### 3.4. Node: `Treatment` (Điều trị)
 
-| Property | Kiểu | Ràng buộc | Nguồn dữ liệu | Ví dụ |
+| Property | Kiểu | Ràng buộc | Nguồn CSV | Ví dụ |
 |---|---|---|---|---|
-| `name` | `String` | **UNIQUE, NOT NULL** | `medications.csv` → cột `Medication` | `"metformin"` |
-
-**Quyết định thiết kế:**
-
-- **Giữ đơn giản ở v1.** Dataset `medications.csv` chỉ cung cấp tên thuốc, không có thông tin chi tiết (liều lượng, tác dụng phụ).
-- **Sẵn sàng mở rộng:** Có thể thêm `type`, `dosage_info`, `side_effects` sau khi enrich data từ nguồn khác.
-- **Drug ĐƯỢC CHIA SẺ giữa các Disease** (many-to-many). Paracetamol trị được cả flu lẫn headache.
-
-**Câu hỏi mà Node này trả lời được:**
-- "Paracetamol dùng để trị bệnh gì?" → truy vấn ngược qua `TREATED_BY`
+| `disease_name` | `String` | **UNIQUE** | `tên_bệnh` | `"Ho gà"` |
+| `cure_method` | `String` | Nullable | `phương_pháp` | `"['Điều trị bằng thuốc','Hỗ trợ']"` |
+| `cure_department` | `String` | Nullable | `khoa_điều_trị` | `"[Nhi khoa]"` |
+| `cure_probability` | `String` | Nullable | `tỉ_lệ_chữa_khỏi` | `"98%"` |
 
 ---
 
-### 3.5. Relationship: `HAS_SYMPTOM`
+### 3.5. Node: `Medicine` (Thuốc)
 
-| Thuộc tính | Chi tiết |
-|---|---|
-| **Hướng** | `(Disease)-[:HAS_SYMPTOM]->(Symptom)` |
-| **Cardinality** | Many-to-Many |
-| **Ý nghĩa** | Bệnh X có triệu chứng Y |
+| Property | Kiểu | Ràng buộc | Nguồn CSV | Ví dụ |
+|---|---|---|---|---|
+| `disease_name` | `String` | **UNIQUE** | `tên_bệnh` | `"Ho gà"` |
+| `drug_detail` | `String` | Nullable | `thông_tin_thuốc` | `"Liều lượng, cách dùng..."` |
+| `drug_common` | `String` | Nullable | `thuốc_phổ_biến` | `"[Paracetamol]"` |
+| `drug_recommend` | `String` | Nullable | `đề_xuất_thuốc` | `"['Erythromycin','Amoxicillin']"` |
 
-| Property | Kiểu | Nguồn | Mô tả |
+---
+
+### 3.6. Node: `Advice` (Lời khuyên)
+
+| Property | Kiểu | Ràng buộc | Nguồn CSV | Ví dụ |
+|---|---|---|---|---|
+| `disease_name` | `String` | **UNIQUE** | `tên_bệnh` | `"Ho gà"` |
+| `nutrition_do_eat` | `String` | Nullable | `nên_ăn_thực_phẩm_chứa` | `"[Hạt bí ngô, bắp cải]"` |
+| `nutrition_recommend_meal` | `String` | Nullable | `đề_xuất_món_ăn` | `"['Súp trứng','Cháo gà']"` |
+| `nutrition_not_eat` | `String` | Nullable | `không_nên_ăn_thực_phẩm_chứa` | `"[Cua, tôm]"` |
+| `disease_prevention` | `String` | Nullable | `cách_phòng_tránh` | `"Tiêm vaccine, giữ vệ sinh..."` |
+
+---
+
+### 3.7. Relationships
+
+| Relationship | Hướng | Ý nghĩa | Ví dụ |
 |---|---|---|---|
-| `severity_weight` | `Integer` | `Symptom-severity.csv` → cột `weight` | Mức độ nghiêm trọng (1-7). Số càng cao → triệu chứng càng nặng |
-
-**Quyết định thiết kế:**
-
-- **`severity_weight` trên Relationship, không trên Node Symptom.** Lý do: severity của headache khi bị flu khác với khi bị brain tumor. Nhưng trong dataset hiện tại, severity là cố định cho mỗi symptom, nên giá trị sẽ giống nhau trên mọi relationship cho cùng symptom. Tuy nhiên, đặt trên relationship sẵn sàng cho tương lai khi severity thay đổi theo bệnh.
-- **Trường hợp sử dụng:** Khi differential diagnosis, có thể ưu tiên các triệu chứng có severity cao hơn.
-
-**Câu hỏi mà Relationship này trả lời được:**
-- "Triệu chứng nào nghiêm trọng nhất của bệnh X?" → sort by `severity_weight DESC`
-- "Bệnh nào có triệu chứng headache?" → match ngược
-
----
-
-### 3.6. Relationship: `TREATED_BY`
-
-| Thuộc tính | Chi tiết |
-|---|---|
-| **Hướng** | `(Disease)-[:TREATED_BY]->(Drug)` |
-| **Cardinality** | Many-to-Many |
-| **Ý nghĩa** | Bệnh X có thể được điều trị bằng thuốc Y |
-
-| Property | Kiểu | Mô tả |
-|---|---|---|
-| *(Không có ở v1)* | — | Có thể thêm `confidence`, `source` ở phiên bản sau |
-
-**Câu hỏi mà Relationship này trả lời được:**
-- "Thuốc nào trị bệnh X?"
-- "Thuốc Y trị được bệnh nào?"
+| `HAS_SYMPTOM` | `(Disease)→(Symptom)` | Bệnh X có triệu chứng Y | `(Viêm phổi)-[:HAS_SYMPTOM]->(...)` |
+| `HAS_TREATMENT` | `(Disease)→(Treatment)` | Bệnh X điều trị bằng Y | `(Ho gà)-[:HAS_TREATMENT]->(...)` |
+| `IS_PRESCRIBED` | `(Disease)→(Medicine)` | Bệnh X dùng thuốc Y | `(Ho gà)-[:IS_PRESCRIBED]->(...)` |
+| `HAS_ADVICE` | `(Disease)→(Advice)` | Bệnh X có lời khuyên Z | `(Tiểu đường)-[:HAS_ADVICE]->(...)` |
+| `IS_LINKED_WITH` | `(Disease)→(Disease)` | Bệnh X đi kèm bệnh Y | `(Viêm phổi)-[:IS_LINKED_WITH]->(Viêm phế quản)` |
 
 ---
 
 ## 4. Thống Kê Dự Kiến
 
-| Thực thể | Số lượng dự kiến | Nguồn |
+| Thực thể | Số lượng | Ghi chú |
 |---|---|---|
-| `Disease` nodes | ~41 (từ 41 unique prognosis trong Training.csv) | `Training.csv` |
-| `Symptom` nodes | ~132 (từ 132 cột symptom) | `Training.csv` |
-| `Drug` nodes | ~200–400 (tùy dedup) | `medications.csv` |
-| `HAS_SYMPTOM` relationships | ~500–1500 (mỗi bệnh trung bình 12–35 symptoms) | `Training.csv` |
-| `TREATED_BY` relationships | ~200–600 | `medications.csv` |
-| **Tổng nodes** | **~373–573** | Rất thoải mái với AuraDB Free (200K limit) |
+| `Disease` nodes | ~8,800 | Mỗi dòng CSV = 1 bệnh |
+| `Symptom` nodes | ~7,000–8,000 | 1:1 với bệnh (trừ rows thiếu data) |
+| `Treatment` nodes | ~7,000–8,000 | Tương tự |
+| `Medicine` nodes | ~6,000–7,000 | Một số bệnh không có thông tin thuốc |
+| `Advice` nodes | ~6,000–7,000 | Tương tự |
+| `HAS_SYMPTOM` rels | ~7,000–8,000 | |
+| `HAS_TREATMENT` rels | ~7,000–8,000 | |
+| `IS_PRESCRIBED` rels | ~6,000–7,000 | |
+| `HAS_ADVICE` rels | ~6,000–7,000 | |
+| `IS_LINKED_WITH` rels | ~3,000–5,000 | Bệnh liên quan |
+| **Tổng nodes** | **~35,000–40,000** | Paper gốc: 41,549 |
+| **Tổng relationships** | **~33,000–38,000** | Paper gốc: 42,112 |
 
 ---
 
 ## 5. Constraints & Indexes
 
-### 5.1. Uniqueness Constraints (Bắt buộc — chạy TRƯỚC KHI import data)
+### 5.1. Uniqueness Constraints (Chạy TRƯỚC KHI import)
 
 ```cypher
--- ═══════════════════════════════════════════
--- CONSTRAINTS: Đảm bảo không trùng lặp
--- Chạy file này trên Neo4j AuraDB TRƯỚC KHI import
--- ═══════════════════════════════════════════
-
--- Mỗi bệnh phải có tên duy nhất
 CREATE CONSTRAINT disease_name_unique IF NOT EXISTS
-FOR (d:Disease) REQUIRE d.name IS UNIQUE;
+FOR (d:Disease) REQUIRE d.disease_name IS UNIQUE;
 
--- Mỗi triệu chứng phải có tên duy nhất
-CREATE CONSTRAINT symptom_name_unique IF NOT EXISTS
-FOR (s:Symptom) REQUIRE s.name IS UNIQUE;
+CREATE CONSTRAINT symptom_key_unique IF NOT EXISTS
+FOR (s:Symptom) REQUIRE s.disease_name IS UNIQUE;
 
--- Mỗi thuốc phải có tên duy nhất
-CREATE CONSTRAINT drug_name_unique IF NOT EXISTS
-FOR (dr:Drug) REQUIRE dr.name IS UNIQUE;
-```
+CREATE CONSTRAINT treatment_key_unique IF NOT EXISTS
+FOR (t:Treatment) REQUIRE t.disease_name IS UNIQUE;
 
-### 5.2. Indexes (Tối ưu tốc độ truy vấn)
+CREATE CONSTRAINT medicine_key_unique IF NOT EXISTS
+FOR (m:Medicine) REQUIRE m.disease_name IS UNIQUE;
 
-```cypher
--- ═══════════════════════════════════════════
--- INDEXES: Tăng tốc tìm kiếm theo name
--- Neo4j tự tạo index cho UNIQUE constraint
--- nên các index dưới đây là TỰ ĐỘNG có
--- CHỈ cần thêm index nếu query theo property khác
--- ═══════════════════════════════════════════
-
--- Index cho severity_weight trên relationship (nếu cần sort)
--- Lưu ý: AuraDB Free có thể không hỗ trợ relationship index
--- Kiểm tra trước khi chạy. Nếu không hỗ trợ, bỏ qua.
--- CREATE INDEX has_symptom_weight IF NOT EXISTS
--- FOR ()-[r:HAS_SYMPTOM]-() ON (r.severity_weight);
+CREATE CONSTRAINT advice_key_unique IF NOT EXISTS
+FOR (a:Advice) REQUIRE a.disease_name IS UNIQUE;
 ```
 
 > [!NOTE]
-> **Khi tạo UNIQUE constraint, Neo4j tự động tạo index cho property đó.** Nên bạn KHÔNG cần tạo thêm index riêng cho `Disease.name`, `Symptom.name`, `Drug.name`. Chỉ cần 3 lệnh constraint ở trên là đủ.
+> UNIQUE constraint **tự động tạo index**. Không cần tạo thêm index riêng.
 
 ---
 
-## 6. Các Mẫu Cypher Query Quan Trọng
+## 6. Các Mẫu Cypher Query
 
-### 6.1. Basic Queries — AI sẽ sinh nhiều nhất
+### 6.1. Basic Queries
 
 ```cypher
--- Q: "Bệnh tiểu đường có triệu chứng gì?"
-MATCH (d:Disease {name: "diabetes"})-[:HAS_SYMPTOM]->(s:Symptom)
-RETURN s.name AS symptom
-ORDER BY s.name;
+-- Q: "Viêm phổi có triệu chứng gì?"
+MATCH (d:Disease {disease_name: "Viêm phổi"})-[:HAS_SYMPTOM]->(s:Symptom)
+RETURN s.disease_symptom AS symptoms, s.check_method AS check;
 
--- Q: "Thuốc nào trị cảm cúm?"
-MATCH (d:Disease {name: "common cold"})-[:TREATED_BY]->(dr:Drug)
-RETURN dr.name AS drug;
+-- Q: "Ho gà điều trị bằng thuốc gì?"
+MATCH (d:Disease {disease_name: "Ho gà"})-[:IS_PRESCRIBED]->(m:Medicine)
+RETURN m.drug_common AS medicine, m.drug_recommend AS recommended;
 
--- Q: "Bệnh tiểu đường là gì?"
-MATCH (d:Disease {name: "diabetes"})
-RETURN d.name AS disease, d.description AS description;
+-- Q: "Viêm phổi là bệnh gì?"
+MATCH (d:Disease {disease_name: "Viêm phổi"})
+RETURN d.disease_description AS description, d.disease_cause AS cause;
 
--- Q: "Cần phòng ngừa gì cho bệnh X?"
-MATCH (d:Disease {name: "diabetes"})
-RETURN d.name AS disease, d.precautions AS precautions;
+-- Q: "Bị tiểu đường nên ăn gì?"
+MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice)
+WHERE d.disease_name CONTAINS "tiểu đường"
+RETURN a.nutrition_do_eat AS should_eat, a.nutrition_not_eat AS should_avoid;
 ```
 
-### 6.2. Multi-hop Queries — Sức mạnh của Graph
+### 6.2. Multi-hop Queries
 
 ```cypher
--- Q: "Bệnh nào vừa có sốt vừa có đau đầu?"
-MATCH (d:Disease)-[:HAS_SYMPTOM]->(s1:Symptom {name: "headache"}),
-      (d)-[:HAS_SYMPTOM]->(s2:Symptom {name: "high fever"})
-RETURN d.name AS disease;
+-- Q: "Viêm phổi đi kèm bệnh gì? Bệnh đó có triệu chứng gì?"
+MATCH (d1:Disease {disease_name: "Viêm phổi"})-[:IS_LINKED_WITH]->(d2:Disease)
+OPTIONAL MATCH (d2)-[:HAS_SYMPTOM]->(s:Symptom)
+RETURN d2.disease_name AS linked_disease, s.disease_symptom AS symptoms;
 
--- Q: "Bệnh nào có triệu chứng đau đầu và trị được bằng paracetamol?"
-MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom {name: "headache"}),
-      (d)-[:TREATED_BY]->(dr:Drug {name: "paracetamol"})
-RETURN d.name AS disease;
+-- Q: "Bệnh nào cùng khoa điều trị với viêm phổi?"
+MATCH (d1:Disease {disease_name: "Viêm phổi"})-[:HAS_TREATMENT]->(t1:Treatment)
+MATCH (d2:Disease)-[:HAS_TREATMENT]->(t2:Treatment)
+WHERE t1.cure_department = t2.cure_department AND d1 <> d2
+RETURN DISTINCT d2.disease_name, t2.cure_department;
 ```
 
-### 6.3. Statistical Queries
+### 6.3. Full Disease Profile
 
 ```cypher
--- Q: "Triệu chứng phổ biến nhất?"
-MATCH (s:Symptom)<-[:HAS_SYMPTOM]-(d:Disease)
-RETURN s.name AS symptom, COUNT(d) AS disease_count
-ORDER BY disease_count DESC
-LIMIT 10;
-
--- Q: "Bệnh nào có nhiều triệu chứng nhất?"
-MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
-RETURN d.name AS disease, COUNT(s) AS symptom_count
-ORDER BY symptom_count DESC
-LIMIT 10;
+-- Q: "Cho tôi toàn bộ thông tin về bệnh Ho gà"
+MATCH (d:Disease {disease_name: "Ho gà"})
+OPTIONAL MATCH (d)-[:HAS_SYMPTOM]->(s:Symptom)
+OPTIONAL MATCH (d)-[:HAS_TREATMENT]->(t:Treatment)
+OPTIONAL MATCH (d)-[:IS_PRESCRIBED]->(m:Medicine)
+OPTIONAL MATCH (d)-[:HAS_ADVICE]->(a:Advice)
+OPTIONAL MATCH (d)-[:IS_LINKED_WITH]->(linked:Disease)
+RETURN d.disease_name AS name,
+       d.disease_description AS description,
+       d.disease_cause AS cause,
+       s.disease_symptom AS symptoms,
+       t.cure_method AS treatment,
+       t.cure_probability AS cure_rate,
+       m.drug_common AS common_drugs,
+       a.nutrition_do_eat AS diet_recommend,
+       a.disease_prevention AS prevention,
+       COLLECT(DISTINCT linked.disease_name) AS linked_diseases;
 ```
 
-### 6.4. Differential Diagnosis — Truy vấn nâng cao
+### 6.4. Search Queries
 
 ```cypher
--- Q: "Tôi bị đau đầu, sốt, mệt mỏi — có thể là bệnh gì?"
-WITH ["headache", "high fever", "fatigue"] AS input_symptoms
-MATCH (d:Disease)-[r:HAS_SYMPTOM]->(s:Symptom)
-WHERE s.name IN input_symptoms
-WITH d.name AS disease,
-     COUNT(s) AS matched,
-     SIZE(input_symptoms) AS total,
-     COLLECT(s.name) AS matched_symptoms
-RETURN disease, matched, total,
-       round(toFloat(matched) / total * 100, 1) AS match_pct,
-       matched_symptoms
-ORDER BY matched DESC, disease
-LIMIT 5;
-```
+-- Q: "Tìm bệnh liên quan đến phổi"
+MATCH (d:Disease)
+WHERE d.disease_name CONTAINS "phổi"
+RETURN d.disease_name, d.disease_description
+ORDER BY d.disease_name;
 
-### 6.5. Severity-aware Queries (tận dụng severity_weight)
-
-```cypher
--- Q: "Triệu chứng nghiêm trọng nhất của bệnh X?"
-MATCH (d:Disease {name: "heart attack"})-[r:HAS_SYMPTOM]->(s:Symptom)
-RETURN s.name AS symptom, r.severity_weight AS severity
-ORDER BY r.severity_weight DESC;
+-- Q: "Bệnh nào có tỷ lệ chữa khỏi cao?"
+MATCH (d:Disease)-[:HAS_TREATMENT]->(t:Treatment)
+WHERE t.cure_probability CONTAINS "90" OR t.cure_probability CONTAINS "95"
+    OR t.cure_probability CONTAINS "98" OR t.cure_probability CONTAINS "99"
+RETURN d.disease_name, t.cure_probability
+ORDER BY t.cure_probability DESC;
 ```
 
 ---
 
-## 7. Tại Sao Schema Này "Chuẩn"?
+## 7. So Sánh Với Schema Cũ (v1 Kaggle)
 
-### 7.1. Tối ưu cho LLM sinh Cypher
-
-| Đặc điểm | Lợi ích |
-|---|---|
-| **Chỉ 3 Node Labels** | LLM chỉ cần nhớ 3 khái niệm → ít sai hơn (giảm lỗi E4: Out-of-Schema) |
-| **Chỉ 2 Relationship Types** | LLM dễ chọn đúng relationship (giảm lỗi E2: Wrong Relationship) |
-| **Tên rõ nghĩa** | `HAS_SYMPTOM`, `TREATED_BY` → đọc hiểu ngay, không nhầm lẫn |
-| **Mọi name đều lowercase** | LLM sinh `{name: "diabetes"}` nhất quán (giảm lỗi E6: Language Mismatch) |
-| **Schema inject gọn** | Prompt ngắn hơn → LLM tập trung hơn vào câu hỏi |
-
-### 7.2. Tối ưu cho truy vấn
-
-| Đặc điểm | Lợi ích |
-|---|---|
-| **UNIQUE constraint trên name** | Tự tạo index → truy vấn `{name: "X"}` cực nhanh (O(1) lookup) |
-| **Many-to-Many qua Relationship** | Truy vấn ngược dễ dàng: "headache thuộc bệnh gì?" |
-| **severity_weight trên relationship** | Sort triệu chứng theo mức độ nghiêm trọng |
-| **description, precautions, diet trên Disease node** | Trả lời câu hỏi mô tả mà không cần thêm JOIN/traversal |
-
-### 7.3. Dễ mở rộng trong tương lai
-
-Khi cần thêm tính năng, chỉ cần **thêm Node hoặc Relationship mới**, KHÔNG cần sửa cái cũ:
-
-```
-Hiện tại (v1):
-  Disease ──HAS_SYMPTOM──→ Symptom
-  Disease ──TREATED_BY───→ Drug
-
-Tương lai (v2) — chỉ THÊM, không SỬA:
-  Disease ──HAS_SYMPTOM──→ Symptom
-  Disease ──TREATED_BY───→ Drug
-  Drug    ──HAS_SIDE_EFFECT──→ SideEffect      ← THÊM
-  Disease ──FOLLOWS_PROTOCOL──→ Protocol        ← THÊM
-  Drug    ──INTERACTS_WITH───→ Drug             ← THÊM
-  Disease.name_vi = "tiểu đường"               ← THÊM property
-```
+| Tiêu chí | v1 (Kaggle) | v2 (VietMedKG) |
+|---|---|---|
+| **Ngôn ngữ data** | Tiếng Anh | **Tiếng Việt** 🇻🇳 |
+| **Số Node Labels** | 3 (Disease, Symptom, Drug) | **5** (Disease, Symptom, Treatment, Medicine, Advice) |
+| **Số Relationship Types** | 2 (HAS_SYMPTOM, TREATED_BY) | **5** (HAS_SYMPTOM, HAS_TREATMENT, IS_PRESCRIBED, HAS_ADVICE, IS_LINKED_WITH) |
+| **Quy mô** | ~573 nodes | **~40,000 nodes** |
+| **Thông tin/bệnh** | Tên + description | **18 trường** (triệu chứng, điều trị, thuốc, dinh dưỡng...) |
+| **Bệnh đi kèm** | ❌ Không có | ✅ IS_LINKED_WITH |
+| **Phù hợp KBQA tiếng Việt** | ❌ Cần dịch | ✅ Sẵn sàng |
 
 ---
 
-## 8. Schema cho System Prompt (Copy nguyên khối vào prompt AI)
-
-Đây là đoạn text gọn nhất mà Đội AI sẽ inject vào System Prompt:
+## 8. Schema cho System Prompt
 
 ```
-## Graph Schema
+## Graph Schema (VietMedKG-based)
 Node Labels:
-- Disease (properties: name, description, precautions, recommended_diet)
-- Symptom (properties: name)
-- Drug (properties: name)
+- Disease (properties: disease_name, disease_description, disease_category, disease_cause)
+- Symptom (properties: disease_name, disease_symptom, check_method, people_easy_get)
+- Treatment (properties: disease_name, cure_method, cure_department, cure_probability)
+- Medicine (properties: disease_name, drug_detail, drug_common, drug_recommend)
+- Advice (properties: disease_name, nutrition_do_eat, nutrition_recommend_meal, nutrition_not_eat, disease_prevention)
 
 Relationship Types:
-- (Disease)-[:HAS_SYMPTOM {severity_weight}]->(Symptom)
-- (Disease)-[:TREATED_BY]->(Drug)
+- (Disease)-[:HAS_SYMPTOM]->(Symptom)
+- (Disease)-[:HAS_TREATMENT]->(Treatment)
+- (Disease)-[:IS_PRESCRIBED]->(Medicine)
+- (Disease)-[:HAS_ADVICE]->(Advice)
+- (Disease)-[:IS_LINKED_WITH]->(Disease)
 
 Constraints:
-- Disease.name is UNIQUE (lowercase English)
-- Symptom.name is UNIQUE (lowercase English, spaces instead of underscores)
-- Drug.name is UNIQUE (lowercase English)
+- All nodes have disease_name as UNIQUE key
+- Disease.disease_name is Capitalized Vietnamese (e.g., "Viêm phổi")
 
-Notes:
-- All entity names are stored in lowercase English
-- severity_weight is an integer 1-7 (higher = more severe)
-- precautions and recommended_diet are lists of strings
+Design Notes:
+- Star schema: each Disease has its own Symptom/Treatment/Medicine/Advice nodes (1:1)
+- Symptom, Treatment data stored as text/lists in single properties
+- Use CONTAINS for fuzzy name matching
+- Data is in Vietnamese
 ```
 
 ---
 
-## 9. Checklist Trước Khi Import
+## 9. Kế Hoạch Mở Rộng (Tương Lai)
 
-- [ ] Tạo AuraDB instance
-- [ ] Chạy 3 lệnh `CREATE CONSTRAINT` (section 5.1)
-- [ ] Kiểm tra constraint đã tạo: `SHOW CONSTRAINTS`
-- [ ] Import Disease nodes (từ Training.csv prognosis + description.csv)
-- [ ] Import Symptom nodes (từ tên 132 cột Training.csv)
-- [ ] Import Drug nodes (từ medications.csv)
-- [ ] Import HAS_SYMPTOM relationships (từ Training.csv binary columns)
-- [ ] Import TREATED_BY relationships (từ medications.csv)
-- [ ] Enrich Disease nodes với precautions + diet
-- [ ] Enrich HAS_SYMPTOM với severity_weight
-- [ ] Validate bằng 7 loại query mẫu (section 6)
-- [ ] Export `graph_schema_summary.md` cho Đội AI
+```
+Hiện tại (v2 — VietMedKG):
+  Disease ──HAS_SYMPTOM──→ Symptom
+  Disease ──HAS_TREATMENT──→ Treatment
+  Disease ──IS_PRESCRIBED──→ Medicine
+  Disease ──HAS_ADVICE──→ Advice
+  Disease ──IS_LINKED_WITH──→ Disease
+
+Tương lai (v3) — THÊM từ ViMedNer + Kaggle:
+  Disease ──HAS_NER_ENTITY──→ NEREntity          ← ViMedNer entities
+  Disease ──TRANSLATED_AS──→ DiseaseEN           ← English mapping
+  Medicine ──HAS_SIDE_EFFECT──→ SideEffect       ← Enrich data
+```
+
+---
+
+## 10. Checklist Trước Khi Import
+
+- [ ] Tạo AuraDB instance (hoặc local Neo4j)
+- [ ] Tạo `.env` file (copy từ `.env.example`)
+- [ ] Chạy 5 lệnh `CREATE CONSTRAINT` (section 5.1)
+- [ ] Chạy `python ai-engine/scripts/import_vietmedkg.py --dry-run` (kiểm tra data)
+- [ ] Chạy `python ai-engine/scripts/import_vietmedkg.py --clear` (import thật)
+- [ ] Validate bằng query mẫu (section 6)
+- [ ] Cập nhật System Prompt cho Đội AI (section 8)

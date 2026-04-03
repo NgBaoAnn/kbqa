@@ -2,3 +2,16 @@
 data/
 docs/DATA_TEAM_WORKPLAN.md
 docs/kbqa_learning_guide.md
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# Large datasets (clone separately)
+ai-engine/data/vietmedkg/
+.agents/
+skills-lock.json
