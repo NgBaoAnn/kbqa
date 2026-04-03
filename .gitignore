@@ -13,4 +13,5 @@ __pycache__/
 
 # Large datasets (clone separately)
 ai-engine/data/vietmedkg/
-\n# Agent Config\n.agents/\nskills-lock.json
+.agents/
+skills-lock.json
