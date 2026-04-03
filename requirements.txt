@@ -1,0 +1,11 @@
+# VietMedKG Knowledge Graph - Python Dependencies
+# Install: pip install -r requirements.txt
+
+# Neo4j Python driver (official, replaces deprecated py2neo)
+neo4j>=5.20.0
+
+# Data processing
+pandas>=2.0.0
+
+# Environment variable management
+python-dotenv>=1.0.0
