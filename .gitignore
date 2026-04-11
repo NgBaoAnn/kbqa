@@ -13,5 +13,12 @@ __pycache__/
 
 # Large datasets (clone separately)
 ai-engine/data/vietmedkg/
+
+# LightRAG working directory (indexed data, embeddings, cache)
+lightrag_data/
+
+# Misc
 .agents/
 skills-lock.json
+.DS_Store
+venv/

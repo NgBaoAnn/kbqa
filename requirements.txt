@@ -9,3 +9,10 @@ pandas>=2.0.0
 
 # Environment variable management
 python-dotenv>=1.0.0
+
+# === LightRAG Framework ===
+lightrag-hku[api]>=1.0.0
+
+# === Embedding & Vector ===
+sentence-transformers>=2.2.0
+numpy>=1.24.0

@@ -10,6 +10,16 @@ neo4j>=5.15.0
 openai>=1.10.0
 httpx>=0.26.0
 
+# == LightRAG ==
+lightrag-hku[api]>=1.0.0
+
+# == Embedding & Vector ==
+sentence-transformers>=2.2.0
+numpy>=1.24.0
+
+# == Data Processing ==
+pandas>=2.1.0
+
 # == Utilities ==
 python-dotenv>=1.0.0
 python-multipart>=0.0.6
