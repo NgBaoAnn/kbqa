@@ -1,18 +1,31 @@
-# VietMedKG Knowledge Graph - Python Dependencies
-# Install: pip install -r requirements.txt
+# AegisHealth KBQA — Python Dependencies
+# ═══════════════════════════════════════
+#
+# Recommended: use editable install from project root:
+#   pip install -e ".[dev]"
+#
+# This installs all deps from pyproject.toml and makes
+# both ai_engine and backend importable.
+#
+# If you prefer requirements.txt:
+#   pip install -r requirements.txt
 
-# Neo4j Python driver (official, replaces deprecated py2neo)
-neo4j>=5.20.0
-
-# Data processing
-pandas>=2.0.0
-
-# Environment variable management
+# ── Core ──
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0
 python-dotenv>=1.0.0
 
-# === LightRAG Framework ===
-lightrag-hku[api]>=1.0.0
+# ── Neo4j ──
+neo4j>=5.20.0
 
-# === Embedding & Vector ===
-sentence-transformers>=2.2.0
-numpy>=1.24.0
+# ── LightRAG ──
+lightrag-hku>=1.0.0
+
+# ── AI / ML ──
+openai>=1.30.0
+numpy>=1.26.0
+pandas>=2.1.0
+
+# ── HTTP ──
+httpx>=0.27.0

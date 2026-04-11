@@ -29,7 +29,7 @@ aegishealth-kbqa/
 │       ├── etl_pipeline.py
 │       └── load_to_neo4j.py
 │
-├── ai-engine/                      # 🧠 AI ENGINE — Hybrid Pipeline (LightRAG + Cypher)
+├── ai_engine/                      # 🧠 AI ENGINE — Hybrid Pipeline (LightRAG + Cypher)
 │   ├── __init__.py
 │   ├── config.py                   # Unified config: LLM, Embedding, LightRAG, Neo4j
 │   ├── prompts/                    # Legacy Prompts (không sử dụng runtime)
@@ -131,7 +131,7 @@ aegishealth-kbqa/
 > |---|---|---|
 > | 🖥️ **CLIENT LAYER** | `web-client/` + `mobile-client/` | React SPA + Flutter App |
 > | ⚙️ **BACKEND MIDDLEWARE** | `backend/` | FastAPI Gateway + Pipeline Orchestrator + Request Router |
-> | 🧠 **AI ENGINE** | `ai-engine/` | LLM Service (Text-to-Cypher, Data-to-Text) + Intent Classifier |
+> | 🧠 **AI ENGINE** | `ai_engine/` | LLM Service (Text-to-Cypher, Data-to-Text) + Intent Classifier |
 > | 🗄️ **DATA LAYER** | `data/` (ETL) + `backend/app/services/graph_service.py` (runtime bridge tới Neo4j AuraDB cloud) |
 >
 > `pipeline.py` nằm trong `backend/` vì theo sơ đồ kiến trúc, **Query Pipeline Orchestrator** thuộc tầng Backend Middleware — nó **điều phối** giữa AI Engine và Data Layer, không phải là thành phần AI thuần túy.

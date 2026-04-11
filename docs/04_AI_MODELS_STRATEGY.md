@@ -141,7 +141,7 @@ Các prompt này có thể được tùy chỉnh thông qua LightRAG's configura
 
 ### 4.4. Legacy Prompts (lưu giữ để tham khảo)
 
-Các prompt cũ (Text-to-Cypher, Data-to-Text) vẫn được lưu trong `ai-engine/prompts/` để tham khảo nhưng **không được sử dụng runtime**.
+Các prompt cũ (Text-to-Cypher, Data-to-Text) vẫn được lưu trong `ai_engine/prompts/` để tham khảo nhưng **không được sử dụng runtime**.
 
 ### 4.3. System Prompt cho Data-to-Text & Intent Classification (Bước 3)
 

@@ -6,8 +6,8 @@ Chỉ chạy queries và lưu kết quả thô.
 Đánh giá accuracy sẽ được thực hiện riêng.
 
 Usage:
-    python ai-engine/eval/run_benchmark.py
-    python ai-engine/eval/run_benchmark.py --models qwen2.5:3b llama3.2:3b
+    python ai_engine/eval/run_benchmark.py
+    python ai_engine/eval/run_benchmark.py --models qwen2.5:3b llama3.2:3b
 """
 
 import json

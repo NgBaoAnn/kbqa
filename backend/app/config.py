@@ -1,9 +1,13 @@
-"""Backend configuration — load environment variables."""
+"""Backend configuration — load environment variables.
+
+Reuses Neo4j credentials from ai_engine.config to ensure single source of truth.
+"""
 
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
+from dotenv import find_dotenv, load_dotenv
+
+load_dotenv(find_dotenv(usecwd=True))
 
 # ── API Configuration ─────────────────────────────────────────────────────
 API_HOST = os.getenv("API_HOST", "0.0.0.0")

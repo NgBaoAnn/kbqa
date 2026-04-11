@@ -25,11 +25,19 @@ async def lifespan(app: FastAPI):
     """Application lifespan — handles startup and shutdown tasks."""
     # Startup
     logger.info("🚀 AegisHealth KBQA Backend starting (v%s)...", API_VERSION)
-    logger.info("   Engine: LightRAG (Graph-Enhanced RAG)")
+    logger.info("   Engine: Hybrid (LightRAG + Cypher)")
+
+    # Validate config
+    from ai_engine.config import validate_config
+
+    config_warnings = validate_config()
+    for w in config_warnings:
+        logger.warning("   ⚠️  Config: %s", w)
 
     # Pre-initialize LightRAG (optional — lazy init also works)
     try:
         from ai_engine.services.lightrag_service import get_lightrag_instance
+
         await get_lightrag_instance()
         logger.info("   ✅ LightRAG initialized")
     except Exception as e:

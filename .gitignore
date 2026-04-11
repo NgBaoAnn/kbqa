@@ -5,14 +5,16 @@ docs/kbqa_learning_guide.md
 
 # Python
 .venv/
+venv/
 __pycache__/
 *.pyc
+*.egg-info/
 
 # Secrets
 .env
 
 # Large datasets (clone separately)
-ai-engine/data/vietmedkg/
+ai_engine/data/vietmedkg/
 
 # LightRAG working directory (indexed data, embeddings, cache)
 lightrag_data/
@@ -21,4 +23,4 @@ lightrag_data/
 .agents/
 skills-lock.json
 .DS_Store
-venv/
+
