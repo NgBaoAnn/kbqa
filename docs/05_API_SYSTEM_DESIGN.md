@@ -40,6 +40,7 @@ POST /api/v1/query
 |---|---|---|---|
 | `question` | `string` | ✅ | Câu hỏi ngôn ngữ tự nhiên của người dùng |
 | `language` | `string` | ❌ | Ngôn ngữ phản hồi mong muốn (`vi` hoặc `en`). Mặc định: `vi` |
+| `mode` | `string` | ❌ | LightRAG query mode: `naive`, `local`, `global`, `hybrid`, `mix`. Mặc định: tự động (Query Router quyết định). Nếu được set, force LightRAG path. |
 
 **Ví dụ Request:**
 
@@ -58,7 +59,7 @@ POST /api/v1/query
 | `response_type` | `string` | Loại phản hồi: `"table"`, `"text"`, hoặc `"warning"` — **quyết định cách client render** |
 | `answer` | `string` | Câu trả lời ngôn ngữ tự nhiên đã tổng hợp |
 | `data` | `array\|null` | Dữ liệu cấu trúc (nếu `response_type = "table"`), `null` nếu không áp dụng |
-| `metadata` | `object` | Thông tin bổ sung (Cypher đã thực thi, thời gian xử lý, v.v.) |
+| `metadata` | `object` | Thông tin bổ sung: `query_mode`, `engine`, `execution_time_ms`, `source_count`, `cypher` (tùy chọn) |
 
 ---
 
@@ -89,19 +90,21 @@ graph TD
 {
   "status": "success",
   "response_type": "table",
-  "answer": "Bệnh tiểu đường (Diabetes) có 6 triệu chứng chính được ghi nhận trong hệ thống. Lưu ý: Thông tin chỉ mang tính chất tham khảo. Vui lòng tham khảo ý kiến bác sĩ chuyên khoa.",
+  "answer": "Bệnh Tiểu Đường có các triệu chứng sau:\n📋 Triệu chứng: Tiểu tiện thường xuyên, Khát nước nhiều, Mệt mỏi, Giảm cân không giải thích, Nhìn mờ, Vết thương chậm lành\n\nLưu ý: Thông tin chỉ mang tính chất tham khảo. Vui lòng tham khảo ý kiến bác sĩ chuyên khoa.",
   "data": [
-    { "symptom": "Tiểu tiện thường xuyên", "symptom_en": "frequent urination" },
-    { "symptom": "Khát nước nhiều", "symptom_en": "increased thirst" },
-    { "symptom": "Mệt mỏi", "symptom_en": "fatigue" },
-    { "symptom": "Giảm cân không giải thích", "symptom_en": "unexplained weight loss" },
-    { "symptom": "Nhìn mờ", "symptom_en": "blurred vision" },
-    { "symptom": "Vết thương chậm lành", "symptom_en": "slow healing wounds" }
+    { "item": "Tiểu tiện thường xuyên" },
+    { "item": "Khát nước nhiều" },
+    { "item": "Mệt mỏi" },
+    { "item": "Giảm cân không giải thích" },
+    { "item": "Nhìn mờ" },
+    { "item": "Vết thương chậm lành" }
   ],
   "metadata": {
-    "cypher": "MATCH (d:Disease {name: 'diabetes'})-[:HAS_SYMPTOM]->(s:Symptom) RETURN s.name AS symptom",
-    "execution_time_ms": 245,
-    "source_count": 6
+    "query_mode": "cypher:symptoms",
+    "execution_time_ms": 85,
+    "source_count": 6,
+    "engine": "cypher_direct",
+    "cypher": "MATCH (d:Disease {disease_name: $name})-[:HAS_SYMPTOM]->(s:Symptom) RETURN s.disease_symptom AS symptoms"
   }
 }
 ```
@@ -120,12 +123,13 @@ graph TD
 {
   "status": "success",
   "response_type": "text",
-  "answer": "Bệnh tiểu đường (Diabetes) là một nhóm bệnh chuyển hóa đặc trưng bởi lượng đường trong máu cao kéo dài. Theo dữ liệu trong hệ thống, bệnh này có liên quan đến 6 triệu chứng chính bao gồm tiểu tiện thường xuyên, khát nước nhiều, và mệt mỏi. Hiện có 3 loại thuốc được ghi nhận trong cơ sở dữ liệu để hỗ trợ điều trị.\n\nLưu ý: Thông tin chỉ mang tính chất tham khảo. Vui lòng tham khảo ý kiến bác sĩ chuyên khoa.",
+  "answer": "Các bệnh liên quan đến hô hấp bao gồm viêm phổi, viêm phế quản, hen suyễn, và COPD. Những bệnh này có chung nhiều triệu chứng như ho, khó thở, và đau ngực. Tuy nhiên, nguyên nhân và phương pháp điều trị khác nhau...\n\nLưu ý: Thông tin chỉ mang tính chất tham khảo. Vui lòng tham khảo ý kiến bác sĩ chuyên khoa.",
   "data": null,
   "metadata": {
-    "cypher": "MATCH (d:Disease {name: 'diabetes'}) RETURN d.name, d.description",
-    "execution_time_ms": 132,
-    "source_count": 1
+    "query_mode": "hybrid",
+    "execution_time_ms": 1850,
+    "source_count": 4,
+    "engine": "lightrag"
   }
 }
 ```
@@ -144,12 +148,13 @@ graph TD
 {
   "status": "success",
   "response_type": "warning",
-  "answer": "⚠️ CẢNH BÁO: Đau ngực dữ dội kết hợp khó thở là triệu chứng nghiêm trọng có thể liên quan đến các bệnh tim mạch nguy hiểm. Dựa trên dữ liệu hệ thống, các triệu chứng này có thể liên quan đến nhồi máu cơ tim (Myocardial Infarction) hoặc thuyên tắc phổi (Pulmonary Embolism).\n\n🏥 VUI LÒNG LIÊN HỆ BÁC SĨ HOẶC GỌI CẤP CỨU NGAY LẬP TỨC.\n\nHệ thống này KHÔNG thay thế chẩn đoán y tế chuyên nghiệp.",
+  "answer": "⚠️ CẢNH BÁO Y TẾ: Đau ngực dữ dội kết hợp khó thở là triệu chứng nghiêm trọng có thể liên quan đến nhồi máu cơ tim hoặc thuyên tắc phổi.\n\n🏥 Nếu bạn đang gặp triệu chứng nguy hiểm, VUI LÒNG LIÊN HỆ BÁC SĨ HOẶC GỌI CẤP CỨU NGAY LẬP TỨC.\n\nHệ thống này KHÔNG thay thế chẩn đoán y tế chuyên nghiệp.",
   "data": null,
   "metadata": {
-    "cypher": "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) WHERE s.name IN ['chest pain', 'shortness of breath'] RETURN d.name, collect(s.name)",
-    "execution_time_ms": 189,
-    "source_count": 2
+    "query_mode": "hybrid",
+    "execution_time_ms": 1200,
+    "source_count": 2,
+    "engine": "lightrag"
   }
 }
 ```
@@ -202,6 +207,8 @@ GET /api/v1/health
   "services": {
     "database": "connected",
     "llm_server": "available",
+    "embedding_server": "available",
+    "lightrag": "initialized",
     "api": "running"
   },
   "version": "1.0.0"

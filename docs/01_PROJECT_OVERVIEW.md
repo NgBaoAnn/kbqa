@@ -1,6 +1,6 @@
 # 01. TỔNG QUAN DỰ ÁN — AegisHealth KBQA
 
-> **Knowledge Base Question Answering cho Y tế — Hybrid GraphRAG**
+> **Knowledge Base Question Answering cho Y tế — Hybrid GraphRAG (LightRAG + Cypher)**
 
 ---
 
@@ -30,42 +30,62 @@ Thực tế trên đặt ra nhu cầu về một kiến trúc mới, có khả n
 
 ---
 
-## 2. Đề xuất Giải pháp: Hybrid GraphRAG
+## 2. Đề xuất Giải pháp: Hybrid GraphRAG (Phương án C)
 
-### 2.1. Nền tảng lý thuyết: ChatKBQA
+### 2.1. Nền tảng lý thuyết
 
-Dự án AegisHealth KBQA lấy cảm hứng kiến trúc từ bài báo nghiên cứu **ChatKBQA** (Luo et al., 2023), trong đó đề xuất phương pháp sử dụng LLM để sinh truy vấn logic (SPARQL/Cypher) trực tiếp lên Knowledge Graph, thay vì tìm kiếm tương đồng trên văn bản phi cấu trúc. Cách tiếp cận này được gọi là **"Generate then Retrieve"** (Sinh lệnh rồi Truy xuất), đối lập với **"Retrieve then Generate"** của RAG truyền thống.
+Dự án AegisHealth KBQA kết hợp hai nền tảng nghiên cứu:
 
-### 2.2. Kiến trúc Generate → Retrieve → Synthesize
+1. **ChatKBQA** (Luo et al., 2023) — phương pháp "Generate then Retrieve": LLM sinh truy vấn logic (Cypher) trực tiếp lên Knowledge Graph, đảm bảo kết quả chính xác cho câu hỏi tra cứu cụ thể.
+2. **LightRAG** (Guo et al., 2024 — EMNLP 2025) — framework GraphRAG sử dụng đồ thị tri thức tự xây dựng kết hợp dual-level retrieval (low-level entity + high-level thematic), xử lý tốt câu hỏi mơ hồ và suy luận nhiều bước.
 
-AegisHealth áp dụng kiến trúc 3 bước cốt lõi:
+### 2.2. Kiến trúc Hybrid: Query Router → Dual-Path
+
+AegisHealth áp dụng kiến trúc **Hybrid (Phương án C)** — kết hợp cả hai đường đi xử lý:
 
 ```mermaid
-graph LR
-    A["🧑 Người dùng <br/> Câu hỏi NL"] --> B["🤖 Bước 1: Generate <br/> Text-to-Cypher"]
-    B --> C["🗄️ Bước 2: Retrieve <br/> Neo4j Query"]
-    C --> D["📝 Bước 3: Synthesize <br/> Data-to-Text"]
-    D --> E["🧑 Người dùng <br/> Câu trả lời NL"]
+graph TB
+    Q["🧑 Người dùng<br/>Câu hỏi NL"] --> ROUTER
 
-    style A fill:#e8f5e9,stroke:#2e7d32
-    style B fill:#e3f2fd,stroke:#1565c0
-    style C fill:#fff3e0,stroke:#e65100
-    style D fill:#f3e5f5,stroke:#7b1fa2
-    style E fill:#e8f5e9,stroke:#2e7d32
+    ROUTER{"🔀 Query Router<br/>Phân tích câu hỏi"}
+    
+    ROUTER -- "Tra cứu chính xác<br/>(triệu chứng X, thuốc Y)" --> CYPHER
+    ROUTER -- "Câu hỏi mơ hồ/thematic<br/>(suy luận, tổng hợp)" --> LIGHTRAG
+    
+    subgraph CYPHER ["🎯 Cypher Path"]
+        CB["Cypher Builder"] --> NEO_E["Neo4j Execute"]
+        NEO_E --> CY_FMT["Format kết quả"]
+    end
+    
+    subgraph LIGHTRAG ["🧠 LightRAG Path"]
+        LRAG["Dual-level Retrieval"] --> LLM_S["LLM Synthesis"]
+        LLM_S --> LR_FMT["Format kết quả"]
+    end
+    
+    NEO_E -. "0 kết quả → fallback" .-> LRAG
+    CY_FMT --> RESP
+    LR_FMT --> RESP
+    
+    RESP["📤 API Response"] --> U["🧑 Người dùng<br/>Câu trả lời NL"]
+
+    style CYPHER fill:#c8e6c9,stroke:#2e7d32
+    style LIGHTRAG fill:#e3f2fd,stroke:#1565c0
 ```
 
-| Bước | Vai trò | So sánh với RAG truyền thống |
+| Đường đi | Khi nào dùng | Ưu điểm |
 |---|---|---|
-| **Generate** (Text-to-Cypher) | LLM dịch câu hỏi tiếng Việt/Anh thành câu lệnh Cypher. | RAG: embed câu hỏi thành vector → tìm kiếm tương đồng. |
-| **Retrieve** (Graph Query) | Neo4j AuraDB thực thi Cypher và trả về kết quả **cấu trúc, xác định**. | RAG: trả về top-k đoạn văn bản *có thể* liên quan. |
-| **Synthesize** (Data-to-Text) | LLM nhận dữ liệu cấu trúc từ DB và tổng hợp thành câu trả lời NL. | RAG: LLM nhận text chunks và *cố gắng tóm tắt*. |
+| **Cypher Path** | Câu hỏi tra cứu chính xác (triệu chứng, thuốc, thống kê) | Nhanh (~50-100ms), deterministic, explainable (có Cypher trace) |
+| **LightRAG Path** | Câu hỏi mơ hồ, thematic, suy luận nhiều bước | Dual-level retrieval (entity + conceptual), xử lý câu hỏi phức tạp |
+| **Auto Fallback** | Cypher không tìm thấy kết quả | Tự động chuyển sang LightRAG để tìm câu trả lời semantic |
 
-### 2.3. Ưu điểm cốt lõi so với Vector-based RAG
+### 2.3. Ưu điểm cốt lõi của kiến trúc Hybrid
 
-- **Triệt tiêu ảo giác ở tầng dữ liệu**: Dữ liệu trả về cho LLM ở bước Synthesize là kết quả truy vấn chính xác từ cơ sở dữ liệu, không phải đoạn văn bản mơ hồ. LLM chỉ đóng vai trò *diễn đạt lại dữ liệu*, không phải *sáng tạo nội dung*.
-- **Suy luận quan hệ tự nhiên**: Graph Database được thiết kế chuyên biệt cho truy vấn quan hệ đa bước (graph traversal). Câu hỏi phức tạp được giải quyết bằng một truy vấn Cypher duy nhất thay vì phải ghép nối nhiều chunks.
-- **Tính minh bạch (Explainability)**: Mọi câu trả lời đều có thể truy vết lại câu lệnh Cypher tương ứng, cho phép kiểm chứng và gỡ lỗi (debuggability).
-- **Kiểm soát đầu ra**: Kiến trúc cho phép phân loại ý định (intent classification) và gán nhãn `response_type` cho phía client render tương ứng (bảng, văn bản, cảnh báo).
+- **Tối ưu cho mọi loại câu hỏi**: Câu hỏi tra cứu chính xác đi qua Cypher (nhanh, deterministic); câu hỏi mơ hồ đi qua LightRAG (semantic, multi-hop reasoning).
+- **Triệt tiêu ảo giác ở tầng dữ liệu**: Cypher path trả kết quả trực tiếp từ Neo4j — không qua LLM sáng tạo. LightRAG path dùng Knowledge Graph làm grounding.
+- **Tính minh bạch (Explainability)**: Cypher path có Cypher trace; LightRAG path có entity/relationship graph.
+- **Auto Fallback**: Nếu Cypher trả 0 kết quả, hệ thống tự động chuyển sang LightRAG — không bao giờ để người dùng thấy kết quả rỗng.
+- **Incremental Update**: LightRAG hỗ trợ cập nhật Knowledge Graph không cần rebuild toàn bộ.
+- **Kiểm soát đầu ra**: `response_type` (table/text/warning) quyết định cách client render.
 
 ---
 
@@ -145,17 +165,20 @@ Knowledge Graph lưu trữ dữ liệu y tế ở dạng cấu trúc (Cypher que
 
 | Metric | Mục tiêu | Cách đo | Tần suất |
 |---|---|---|---|
-| **Cypher Generation Accuracy** | ≥ 85% | % Cypher hợp lệ VÀ đúng ngữ nghĩa trên Golden Test Set (50–100 câu) | Mỗi sprint |
+| **Query Routing Accuracy** | ≥ 90% | % câu hỏi được route đúng path (Cypher vs LightRAG) trên Golden Test Set | Mỗi sprint |
+| **Cypher Path Accuracy** | ≥ 95% | % kết quả Cypher chính xác trên câu hỏi tra cứu entity | Mỗi sprint |
+| **LightRAG Retrieval Quality** | ≥ 80% | Relevance score trung bình trên câu hỏi thematic | Mỗi sprint |
 | **End-to-End Latency (P50)** | < 2000ms | Percentile 50 thời gian toàn pipeline | Real-time |
 | **End-to-End Latency (P95)** | < 5000ms | Percentile 95 thời gian toàn pipeline | Real-time |
 | **System Uptime** | ≥ 99% (demo) | Health check endpoint monitoring | Real-time |
-| **Cypher Success Rate** | ≥ 90% | % Cypher thực thi không lỗi trên Neo4j | Hàng ngày |
 
 ---
 
 ## 7. Tài liệu tham khảo
 
-1. Luo, J., et al. (2023). *ChatKBQA: A Generate-then-Retrieve Framework for Knowledge Base Question Answering with Fine-tuned Large Language Models*. arXiv preprint.
-2. Lewis, P., et al. (2020). *Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks*. NeurIPS.
-3. Neo4j Documentation. *The Neo4j Graph Database*. https://neo4j.com/docs/
-4. Neo4j AuraDB. *Fully Managed Cloud Graph Database*. https://neo4j.com/cloud/platform/aura-graph-database/
+1. Guo, Z., et al. (2024). *LightRAG: Simple and Fast Retrieval-Augmented Generation*. EMNLP 2025. arXiv:2410.05779.
+2. Luo, J., et al. (2023). *ChatKBQA: A Generate-then-Retrieve Framework for Knowledge Base Question Answering with Fine-tuned Large Language Models*. arXiv preprint.
+3. Lewis, P., et al. (2020). *Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks*. NeurIPS.
+4. Neo4j Documentation. *The Neo4j Graph Database*. https://neo4j.com/docs/
+5. Neo4j AuraDB. *Fully Managed Cloud Graph Database*. https://neo4j.com/cloud/platform/aura-graph-database/
+6. HKUDS/LightRAG GitHub. https://github.com/HKUDS/LightRAG

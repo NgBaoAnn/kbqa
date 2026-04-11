@@ -1,6 +1,6 @@
 # 02. KIẾN TRÚC HỆ THỐNG — AegisHealth KBQA
 
-> **System Architecture: Generate → Retrieve → Synthesize**
+> **System Architecture: Hybrid GraphRAG — Query Router → Dual-Path (Cypher + LightRAG)**
 
 ---
 
@@ -17,31 +17,51 @@ flowchart TB
     subgraph BACKEND ["⚙️ BACKEND MIDDLEWARE"]
         direction TB
         API["FastAPI<br/>RESTful API Gateway"]
-        ROUTER["Request Router<br/>& Validator"]
-        PIPELINE["Query Pipeline<br/>Orchestrator"]
+        VALIDATOR["Request Validator<br/>& Input Sanitizer"]
+        PIPELINE["Pipeline Orchestrator<br/>(Hybrid Dual-Path)"]
     end
 
     subgraph AI_ENGINE ["🧠 AI ENGINE"]
         direction TB
-        LLM_GEN["SLM — Text-to-Cypher<br/>(Generate Phase)"]
-        LLM_SYN["SLM — Data-to-Text<br/>(Synthesize Phase)"]
+        ROUTER["Query Router<br/>Phân loại câu hỏi"]
+        
+        subgraph CYPHER_PATH ["🎯 CYPHER PATH"]
+            BUILDER["Cypher Query Builder"]
+            FORMATTER["Result Formatter<br/>(Deterministic)"]
+        end
+        
+        subgraph LIGHTRAG_PATH ["🧠 LIGHTRAG PATH"]
+            LRAG["LightRAG Core<br/>Dual-level Retrieval"]
+            LLM_SYN["LLM Synthesizer"]
+        end
+        
         INTENT["Intent Classifier<br/>& Response Typer"]
     end
 
-    subgraph DATA_LAYER ["🗄️ DATA LAYER (Cloud)"]
-        NEO4J["Neo4j AuraDB<br/>Managed Graph Database"]
+    subgraph DATA_LAYER ["🗄️ DATA LAYER"]
+        NEO4J["Neo4j AuraDB<br/>VietMedKG Graph"]
+        VECTOR["Vector Store<br/>(NanoVectorDB)"]
     end
 
     WEB -- "HTTP/JSON" --> API
     MOBILE -- "HTTP/JSON" --> API
-    API --> ROUTER
-    ROUTER --> PIPELINE
-    PIPELINE -- "Prompt + Schema" --> LLM_GEN
-    LLM_GEN -- "Cypher Query" --> PIPELINE
-    PIPELINE -- "Cypher" --> NEO4J
-    NEO4J -- "Structured Data" --> PIPELINE
-    PIPELINE -- "Data + Prompt" --> LLM_SYN
-    LLM_SYN -- "NL Response" --> INTENT
+    API --> VALIDATOR
+    VALIDATOR --> PIPELINE
+    PIPELINE --> ROUTER
+    
+    ROUTER -- "Tra cứu chính xác" --> BUILDER
+    BUILDER -- "Cypher" --> NEO4J
+    NEO4J -- "Records" --> FORMATTER
+    FORMATTER --> INTENT
+    
+    ROUTER -- "Câu hỏi mơ hồ/thematic" --> LRAG
+    LRAG --> NEO4J
+    LRAG --> VECTOR
+    LRAG --> LLM_SYN
+    LLM_SYN --> INTENT
+    
+    BUILDER -. "0 kết quả → fallback" .-> LRAG
+    
     INTENT -- "Typed Response" --> PIPELINE
     PIPELINE --> API
     API -- "JSON Response" --> WEB
@@ -50,12 +70,14 @@ flowchart TB
     style CLIENTS fill:#e3f2fd,stroke:#1565c0
     style BACKEND fill:#fff3e0,stroke:#e65100
     style AI_ENGINE fill:#f3e5f5,stroke:#7b1fa2
+    style CYPHER_PATH fill:#c8e6c9,stroke:#2e7d32
+    style LIGHTRAG_PATH fill:#bbdefb,stroke:#1565c0
     style DATA_LAYER fill:#e8f5e9,stroke:#2e7d32
 ```
 
 ---
 
-## 2. Diễn giải Chi tiết Luồng Xử lý 3 Bước
+## 2. Diễn giải Chi tiết Luồng Xử lý — Hybrid Dual-Path
 
 ### 2.1. Luồng Tổng quan (Sequence Diagram)
 
@@ -64,106 +86,140 @@ sequenceDiagram
     participant U as 👤 User
     participant C as 🖥️ Client (Web/Mobile)
     participant F as ⚙️ FastAPI Backend
-    participant L as 🤖 Local SLM (Ollama/vLLM)
+    participant R as 🔀 Query Router
+    participant B as 🎯 Cypher Builder
     participant N as 🗄️ Neo4j AuraDB
+    participant LR as 🧠 LightRAG
+    participant L as 🤖 Local SLM (Ollama)
 
     U->>C: Nhập câu hỏi NL
     C->>F: POST /api/v1/query {question}
-    
-    rect rgb(227, 242, 253)
-        Note over F,L: BƯỚC 1 — GENERATE (Text-to-Cypher)
-        F->>L: System Prompt + User Question
-        L-->>F: Cypher Query String
+    F->>R: Phân tích câu hỏi
+
+    alt Cypher Path — Tra cứu chính xác
+        rect rgb(200, 230, 201)
+            Note over R,N: CYPHER PATH — Deterministic lookup
+            R->>B: route=CYPHER (type=symptoms, entity="Viêm phổi")
+            B->>N: Execute Cypher Query
+            N-->>B: Structured Records
+            B-->>F: Formatted Vietnamese text
+        end
+    else LightRAG Path — Semantic retrieval
+        rect rgb(187, 222, 251)
+            Note over R,LR: LIGHTRAG PATH — Graph-enhanced retrieval
+            R->>LR: route=LIGHTRAG
+            LR->>N: Graph traversal (entities/relationships)
+            LR->>L: LLM synthesis
+            L-->>LR: NL Answer
+            LR-->>F: Synthesized response
+        end
     end
-    
-    rect rgb(255, 243, 224)
-        Note over F,N: BƯỚC 2 — RETRIEVE (Database Query)
-        F->>N: Execute Cypher Query
-        N-->>F: Structured Records
-    end
-    
-    rect rgb(243, 229, 245)
-        Note over F,L: BƯỚC 3 — SYNTHESIZE (Data-to-Text)
-        F->>L: Data Context + Synthesis Prompt
-        L-->>F: NL Answer + response_type
-    end
-    
-    F-->>C: JSON Response {answer, data, response_type}
+
+    Note over F: Intent Classification + Response Formatting
+    F-->>C: JSON Response {answer, data, response_type, metadata}
     C-->>U: Render UI theo response_type
 ```
 
-### 2.2. Bước 1 — Generate: Text-to-Cypher
+### 2.2. Query Router — Trái tim của Kiến trúc Hybrid
 
-**Mục tiêu**: Dịch câu hỏi ngôn ngữ tự nhiên (NL) thành câu lệnh truy vấn Cypher hợp lệ.
+**Mục tiêu**: Phân tích câu hỏi đầu vào và quyết định đường đi xử lý tối ưu.
 
-**Quy trình chi tiết**:
+**Logic phân loại**:
 
-1. **Tiền xử lý (Preprocessing)**:
-   - Chuẩn hóa câu hỏi đầu vào (loại bỏ ký tự đặc biệt, chuẩn hóa Unicode).
-   - Gắn schema context vào prompt để LLM hiểu cấu trúc đồ thị hiện có.
+```mermaid
+flowchart TD
+    Q["Câu hỏi NL"] --> CHECK_COUNT{"Thống kê/đếm?<br/>(bao nhiêu, tổng số)"}
+    CHECK_COUNT -- "Có" --> CYPHER_COUNT["→ CYPHER: count"]
+    CHECK_COUNT -- "Không" --> CHECK_ENTITY{"Tra cứu entity?<br/>(triệu chứng X, thuốc Y)"}
+    CHECK_ENTITY -- "Có" --> CYPHER_LOOKUP["→ CYPHER: symptoms/medicine/treatment/..."]
+    CHECK_ENTITY -- "Không" --> LIGHTRAG_SEMANTIC["→ LIGHTRAG: semantic retrieval"]
 
-2. **Prompt Construction**:
-   - System prompt chứa: (a) Graph Schema đầy đủ (node labels, relationship types, property keys), (b) Các ví dụ few-shot Cypher, (c) Ràng buộc định dạng đầu ra.
-   - User prompt chứa câu hỏi gốc của người dùng.
+    CYPHER_COUNT --> EXECUTE
+    CYPHER_LOOKUP --> EXECUTE
+    LIGHTRAG_SEMANTIC --> EXECUTE["Thực thi"]
 
-3. **LLM Inference**:
-   - SLM nhận prompt và sinh ra câu lệnh Cypher.
-   - Output được parse và validate theo cú pháp Cypher.
+    style CYPHER_COUNT fill:#c8e6c9,stroke:#2e7d32
+    style CYPHER_LOOKUP fill:#c8e6c9,stroke:#2e7d32
+    style LIGHTRAG_SEMANTIC fill:#bbdefb,stroke:#1565c0
+```
 
-**Ví dụ minh họa**:
-
-| Input (NL) | Output (Cypher) |
-|---|---|
-| *"Bệnh tiểu đường có những triệu chứng gì?"* | `MATCH (d:Disease {name: "Diabetes"})-[:HAS_SYMPTOM]->(s:Symptom) RETURN s.name` |
-| *"Thuốc nào dùng để điều trị cảm cúm?"* | `MATCH (d:Disease {name: "Influenza"})-[:TREATED_BY]->(dr:Drug) RETURN dr.name` |
-
-**Xử lý lỗi**: Nếu Cypher sinh ra không hợp lệ (syntax error), pipeline sẽ thực hiện retry hoặc trả về thông báo lỗi thân thiện cho người dùng.
-
----
-
-### 2.3. Bước 2 — Retrieve: Database Query Execution
-
-**Mục tiêu**: Thực thi câu lệnh Cypher trên Neo4j AuraDB (cloud) và nhận kết quả dữ liệu cấu trúc.
-
-**Quy trình chi tiết**:
-
-1. **Query Execution**:
-   - Backend sử dụng Neo4j Python Driver để kết nối đến Neo4j AuraDB instance qua giao thức `neo4j+s://` (TLS encrypted) và gửi Cypher query.
-   - Truy vấn được thực thi trong read transaction để đảm bảo tính consistency.
-
-2. **Result Processing**:
-   - Kết quả trả về dưới dạng danh sách record (key-value pairs).
-   - Backend chuyển đổi Neo4j Record objects thành Python dictionaries.
-
-3. **Empty Result Handling**:
-   - Nếu kết quả rỗng, hệ thống ghi nhận để bước Synthesize có thể phản hồi phù hợp (ví dụ: *"Không tìm thấy thông tin về bệnh X trong cơ sở dữ liệu."*).
-
-**Đặc điểm quan trọng**: Kết quả ở bước này là **deterministic** (xác định) — cùng một câu Cypher luôn cho ra cùng một kết quả, đảm bảo tính nhất quán và khả năng kiểm chứng.
+| Loại câu hỏi | Path | Ví dụ |
+|---|---|---|
+| Triệu chứng bệnh cụ thể | **Cypher** | "Viêm phổi có triệu chứng gì?" |
+| Thuốc điều trị bệnh | **Cypher** | "Bệnh tiểu đường dùng thuốc gì?" |
+| Thống kê/đếm | **Cypher** | "Có bao nhiêu bệnh trong cơ sở dữ liệu?" |
+| Profile bệnh | **Cypher** | "Cho tôi toàn bộ thông tin về bệnh gout" |
+| Dinh dưỡng/phòng tránh | **Cypher** | "Bị gout nên ăn gì?" |
+| Câu hỏi mơ hồ | **LightRAG** | "Bệnh nào liên quan đến hô hấp?" |
+| Suy luận nhiều bước | **LightRAG** | "Mối liên hệ giữa tiểu đường và tim mạch?" |
+| So sánh/tổng hợp | **LightRAG** | "So sánh viêm phổi và viêm phế quản" |
+| Tư vấn tổng quát | **LightRAG** | "Làm gì để phòng bệnh mùa đông?" |
 
 ---
 
-### 2.4. Bước 3 — Synthesize: Data-to-Text & Intent Classification
+### 2.3. Cypher Path — Truy vấn trực tiếp VietMedKG
 
-**Mục tiêu**: Tổng hợp dữ liệu cấu trúc từ Neo4j AuraDB thành câu trả lời ngôn ngữ tự nhiên, đồng thời phân loại loại phản hồi phù hợp.
+**Khi nào**: Câu hỏi tra cứu entity cụ thể hoặc thống kê trên graph VietMedKG.
 
-**Quy trình chi tiết**:
+**Quy trình**:
+1. **Query Router** phân tích câu hỏi, extract disease name và query type
+2. **Cypher Builder** sinh Cypher query cố định theo schema VietMedKG (không cần LLM sinh Cypher)
+3. **Neo4j** thực thi Cypher, trả về records
+4. **Result Formatter** chuyển records thành text tiếng Việt (deterministic, không cần LLM)
+5. Nếu 0 kết quả → **Auto Fallback** sang LightRAG Path
 
-1. **Data-to-Text Generation**:
-   - LLM nhận dữ liệu cấu trúc từ DB (dưới dạng JSON) kèm prompt hướng dẫn diễn đạt.
-   - LLM tổng hợp thành câu trả lời tự nhiên, dễ hiểu cho người dùng.
+**Ví dụ:**
 
-2. **Intent Classification & Response Typing**:
-   - Song song hoặc ngay sau bước sinh text, LLM phân loại câu trả lời vào một trong các `response_type`:
+| Input | Cypher sinh ra | Output |
+|---|---|---|
+| "Viêm phổi có triệu chứng gì?" | `MATCH (d:Disease {disease_name: "Viêm Phổi"})-[:HAS_SYMPTOM]->(s:Symptom) RETURN s` | "Bệnh Viêm Phổi có triệu chứng: Ho, Sốt, Khó thở..." |
+| "Có bao nhiêu bệnh?" | `MATCH (d:Disease) RETURN count(d) AS disease_count` | "📊 Số bệnh: 8800" |
 
-   | `response_type` | Mô tả | Ví dụ câu hỏi |
-   |---|---|---|
-   | `table` | Kết quả dạng danh sách/bảng dữ liệu | *"Liệt kê triệu chứng bệnh tiểu đường"* |
-   | `text` | Giải thích hoặc mô tả bằng văn bản | *"Bệnh tiểu đường là gì?"* |
-   | `warning` | Cảnh báo y tế quan trọng | *"Tôi bị đau ngực dữ dội"* |
+**Đặc điểm**: Nhanh (~50-100ms), deterministic, explainable (có Cypher trace trong metadata).
 
-3. **Response Assembly**:
-   - Backend đóng gói `answer` (text), `data` (structured data), và `response_type` thành JSON response chuẩn.
-   - Response được gửi về client.
+---
+
+### 2.4. LightRAG Path — Graph-Enhanced Semantic Retrieval
+
+**Khi nào**: Câu hỏi mơ hồ, thematic, suy luận nhiều bước, hoặc Cypher path trả 0 kết quả.
+
+**Quy trình**:
+1. **LightRAG Core** nhận câu hỏi
+2. **Dual-level Retrieval**:
+   - **Low-level**: Tìm entities cụ thể và quan hệ trực tiếp từ Knowledge Graph
+   - **High-level**: Tìm chủ đề và khái niệm liên quan từ graph cấp cao
+3. **LLM Synthesis**: Tổng hợp context từ cả hai level thành câu trả lời tự nhiên
+4. **Response Formatting**: Phân loại response_type và thêm disclaimer
+
+**Các chế độ query** (configurable qua API hoặc `.env`):
+
+| Mode | Mô tả | Use case |
+|---|---|---|
+| `naive` | Vector search thuần | Câu hỏi đơn giản |
+| `local` | Entity-focused retrieval | Câu hỏi về entity cụ thể |
+| `global` | Theme-focused retrieval | Câu hỏi tổng quát |
+| `hybrid` | Local + Global | Cân bằng (mặc định) |
+| `mix` | Local + Global + Reranker | Chất lượng cao nhất (cần reranker model) |
+
+---
+
+### 2.5. Auto Fallback Mechanism
+
+```mermaid
+flowchart LR
+    CY["Cypher Path"] --> CHECK{"Kết quả?"}
+    CHECK -- "Có dữ liệu" --> FORMAT["Format & Return"]
+    CHECK -- "0 kết quả" --> FALLBACK["Auto Fallback"]
+    CHECK -- "Lỗi thực thi" --> FALLBACK
+    FALLBACK --> LR["LightRAG Path"]
+    LR --> FORMAT
+
+    style CY fill:#c8e6c9,stroke:#2e7d32
+    style LR fill:#bbdefb,stroke:#1565c0
+    style FALLBACK fill:#fff9c4,stroke:#f9a825
+```
+
+Cơ chế đảm bảo người dùng **luôn nhận được câu trả lời** — nếu Cypher trả kết quả rỗng hoặc lỗi, hệ thống tự động thử LightRAG trước khi trả fallback message.
 
 ---
 
@@ -173,47 +229,56 @@ sequenceDiagram
 
 | Khía cạnh | Chi tiết |
 |---|---|
-| **Vai trò** | Lưu trữ đồ thị tri thức y tế; là **Single Source of Truth** cho toàn bộ hệ thống. |
-| **Dịch vụ** | **Neo4j AuraDB** — dịch vụ Graph Database được quản lý hoàn toàn (fully-managed) trên cloud bởi Neo4j, Inc. Loại bỏ gánh nặng vận hành hạ tầng (provisioning, backup, scaling, patching). |
+| **Vai trò** | Lưu trữ đồ thị tri thức y tế VietMedKG (cho Cypher Path) + đồ thị LightRAG (cho LightRAG Path). Là **Single Source of Truth**. |
+| **Dịch vụ** | **Neo4j AuraDB** — dịch vụ Graph Database được quản lý hoàn toàn (fully-managed) trên cloud bởi Neo4j, Inc. |
 | **Mô hình dữ liệu** | Property Graph Model — Node (thực thể) và Relationship (quan hệ) đều có thể mang properties. |
-| **Ngôn ngữ truy vấn** | Cypher — ngôn ngữ truy vấn đồ thị khai báo (declarative), trực quan cho pattern matching. |
-| **Kết nối** | Backend kết nối qua giao thức `neo4j+s://` (Bolt over TLS), đảm bảo mã hóa end-to-end. Xác thực bằng username/password do AuraDB cung cấp. |
-| **Lý do lựa chọn AuraDB** | (1) **Không cần quản trị DB**: Team tập trung vào phát triển tính năng thay vì vận hành infrastructure. (2) **Free tier khả dụng**: AuraDB Free cung cấp 200K nodes, đủ cho phạm vi dự án. (3) **Bảo mật mặc định**: TLS encryption, IP allowlisting, auto-backup. (4) Phù hợp tự nhiên với dữ liệu y tế (quan hệ Bệnh-Triệu chứng-Thuốc); hiệu suất truy vấn quan hệ vượt trội so với SQL JOIN truyền thống. |
+| **Ngôn ngữ truy vấn** | Cypher — ngôn ngữ truy vấn đồ thị khai báo (declarative). |
+| **Kết nối** | Backend kết nối qua giao thức `neo4j+s://` (Bolt over TLS), đảm bảo mã hóa end-to-end. |
+| **Dual-use** | **(1)** Cypher Path truy vấn trực tiếp schema VietMedKG. **(2)** LightRAG dùng Neo4JStorage để lưu entities/relationships đã extract. |
 
-### 3.2. FastAPI — Backend Middleware (Tầng Điều phối)
+### 3.2. LightRAG — Graph-Enhanced RAG Framework (Tầng AI)
 
 | Khía cạnh | Chi tiết |
 |---|---|
-| **Vai trò** | API Gateway trung tâm — tiếp nhận request từ client, điều phối luồng 3 bước, trả kết quả. |
-| **Kiến trúc** | Async-first (dựa trên `asyncio`), hỗ trợ xử lý đồng thời cao mà không cần multi-threading phức tạp. |
+| **Vai trò** | Graph-based indexing + dual-level retrieval cho câu hỏi semantic/thematic. |
+| **Nguồn gốc** | HKUDS (HKU), EMNLP 2025. arXiv:2410.05779. MIT License. |
+| **Indexing** | Extract entities/relationships từ documents bằng LLM → xây dựng Knowledge Graph tự động. |
+| **Retrieval** | Dual-level: Low-level (entity-focused) + High-level (theme-focused). |
+| **Storage** | Graph → `Neo4JStorage` (cùng instance AuraDB). Vector → `NanoVectorDB` (local). |
+| **Embedding** | `BAAI/bge-m3` — đa ngôn ngữ, hỗ trợ tiếng Việt. |
+
+### 3.3. FastAPI — Backend Middleware (Tầng Điều phối)
+
+| Khía cạnh | Chi tiết |
+|---|---|
+| **Vai trò** | API Gateway trung tâm — tiếp nhận request từ client, điều phối Hybrid pipeline, trả kết quả. |
+| **Kiến trúc** | Async-first (dựa trên `asyncio`), hỗ trợ xử lý đồng thời cao. |
 | **Validation** | Tích hợp Pydantic cho request/response validation, tự động sinh OpenAPI documentation. |
-| **Lý do lựa chọn** | Hiệu suất cao (ngang Golang/NodeJS), native async support, Python ecosystem tương thích với AI/ML libraries. |
+| **Lý do lựa chọn** | Hiệu suất cao, native async support, Python ecosystem tương thích với LightRAG + AI/ML libraries. |
 
-### 3.3. Open-source SLM via Ollama/vLLM (Tầng AI)
+### 3.4. Open-source SLM via Ollama/vLLM (Tầng AI)
 
 | Khía cạnh | Chi tiết |
 |---|---|
-| **Vai trò** | Thực hiện hai nhiệm vụ cốt lõi: (1) Text-to-Cypher generation, (2) Data-to-Text synthesis & intent classification. |
-| **Mô hình** | Small Language Models (SLM) như Llama-3-8B, Qwen-2.5 series, hoặc tương đương. |
-| **Serving** | Ollama (đơn giản, phù hợp dev/demo) hoặc vLLM (tối ưu throughput, phù hợp production). |
-| **Lý do lựa chọn** | Kiểm soát toàn bộ dữ liệu (không gửi dữ liệu y tế ra bên ngoài), không chi phí API, có thể fine-tune cho domain cụ thể. |
+| **Vai trò** | **(1)** LightRAG indexing: entity/relationship extraction. **(2)** LightRAG querying: synthesis answer. **(3)** Embedding generation. |
+| **Mô hình** | LLM: Qwen-2.5 series (14B khuyến nghị, 7B tối thiểu). Embedding: BAAI/bge-m3. |
+| **Serving** | Ollama (dev/demo) hoặc vLLM (production). OpenAI-compatible API. |
+| **Lý do lựa chọn** | Kiểm soát toàn bộ dữ liệu (no-data-out policy), không chi phí API, có thể fine-tune. |
 
-### 3.4. ReactJS + Bootstrap — Web Client (Tầng Giao diện Web)
+### 3.5. ReactJS + Bootstrap — Web Client (Tầng Giao diện Web)
 
 | Khía cạnh | Chi tiết |
 |---|---|
 | **Vai trò** | Single-Page Application cho người dùng web, giao tiếp với Backend qua RESTful API. |
 | **Rendering** | Dynamic Rendering dựa trên `response_type` từ Backend — Client là lớp hiển thị thuần túy (thin client). |
 | **UI Framework** | Bootstrap Grid cho responsive layout; component-based architecture của React cho tái sử dụng giao diện. |
-| **Lý do lựa chọn** | Hệ sinh thái lớn, dễ tiếp cận cho team phát triển, responsive out-of-the-box với Bootstrap. |
 
-### 3.5. Flutter — Mobile Client (Tầng Giao diện Mobile)
+### 3.6. Flutter — Mobile Client (Tầng Giao diện Mobile)
 
 | Khía cạnh | Chi tiết |
 |---|---|
 | **Vai trò** | Cross-platform mobile application (Android/iOS) chia sẻ cùng Backend API với Web Client. |
-| **Rendering** | Tương tự Web — Dynamic Rendering dựa trên `response_type`, sử dụng Widget system của Flutter. |
-| **Lý do lựa chọn** | Single codebase cho cả Android và iOS; hiệu năng native-like; rich widget library cho UI y tế chuyên nghiệp. |
+| **Rendering** | Tương tự Web — Dynamic Rendering dựa trên `response_type`. |
 
 ---
 
@@ -226,8 +291,8 @@ Kiến trúc được phân tầng rõ ràng, mỗi tầng có trách nhiệm du
 ```mermaid
 graph TB
     A["Client Layer<br/>Chỉ render & thu thập input"] --> B["API Layer<br/>Validation, routing, orchestration"]
-    B --> C["AI Layer<br/>NL understanding & generation"]
-    B --> D["Data Layer<br/>Structured storage & retrieval"]
+    B --> C["AI Layer<br/>Query routing, retrieval, synthesis"]
+    B --> D["Data Layer<br/>Graph storage (Neo4j) & Vector storage"]
 
     style A fill:#e3f2fd,stroke:#1565c0
     style B fill:#fff3e0,stroke:#e65100
@@ -237,15 +302,21 @@ graph TB
 
 ### 4.2. Backend-Driven UI
 
-Triết lý cốt lõi: **Backend quyết định cách hiển thị, Client chỉ thực thi**. Trường `response_type` trong JSON response đóng vai trò như một lệnh điều khiển (directive) gửi từ Backend xuống Client, cho phép thay đổi logic hiển thị mà không cần cập nhật ứng dụng client.
+Triết lý cốt lõi: **Backend quyết định cách hiển thị, Client chỉ thực thi**. Trường `response_type` trong JSON response đóng vai trò như một lệnh điều khiển (directive) gửi từ Backend xuống Client. Trường `metadata.engine` cho biết câu trả lời đến từ path nào (`cypher_direct` hoặc `lightrag`).
 
 ### 4.3. Stateless API
 
 Mỗi request từ client là độc lập, Backend không lưu trạng thái phiên (session state). Điều này đảm bảo khả năng mở rộng ngang (horizontal scaling) trong tương lai.
 
-### 4.4. Fail-safe Design
+### 4.4. Fail-safe Design — Hybrid Fallback
 
 Tại mỗi bước trong pipeline, hệ thống có cơ chế xử lý lỗi rõ ràng:
-- **Bước 1 thất bại** (Cypher không hợp lệ): Trả về thông báo yêu cầu làm rõ câu hỏi.
-- **Bước 2 thất bại** (DB timeout/error): Trả về lỗi hệ thống với mã lỗi chuẩn.
-- **Bước 3 thất bại** (LLM timeout): Trả về dữ liệu thô (raw data) từ DB mà không qua bước tổng hợp.
+
+| Tình huống | Xử lý |
+|---|---|
+| Cypher Path trả 0 kết quả | Auto fallback → LightRAG Path |
+| Cypher Path lỗi thực thi | Auto fallback → LightRAG Path |
+| LightRAG query thất bại | Trả thông báo lỗi thân thiện |
+| LLM server không phản hồi | HTTP 503 + user-friendly message |
+| Neo4j AuraDB timeout | HTTP 500 + retry suggestion |
+| Câu hỏi ngoài domain | LightRAG trả "Tôi chỉ hỗ trợ câu hỏi y tế" |
