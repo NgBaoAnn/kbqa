@@ -186,7 +186,7 @@ def run_pipeline(sample_size=None):
         futures = []
         for item in triples:
             futures.append(executor.submit(gen_b2x.process_item, item))
-            if item['relation'] != 'tỉ_lệ_chữa_khỏi': # Skip this for X to Benh
+            if item['relation'] != 'cure_probability': # Skip this for X to Benh
                 futures.append(executor.submit(gen_x2b.process_item, item))
                 
         for future in tqdm(as_completed(futures), total=len(futures), desc="Calling OpenAI"):

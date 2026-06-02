@@ -18,12 +18,12 @@ log = logging.getLogger(__name__)
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
-def extract_content(question: str) -> str:
+def extract_content(question: str) -> str | None:
     """Extract content within square brackets from the question."""
-    try: 
-        return re.search(r'\[(.*?)\]', question).group(1).lower()
-    except:
-        return None
+    match = re.search(r'\[(.*?)\]', question)
+    if match:
+        return match.group(1).lower()
+    return None
 
 def jaccard_similarity(set1: set, set2: set) -> float:
     """Compute the Jaccard similarity score between two sets of words."""

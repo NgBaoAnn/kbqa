@@ -59,7 +59,7 @@ preprocessed_data.csv (Cleaned Columns)
 ├── drug_common ───────────────→ Medicine.drug_common
 ├── drug_detail ───────────────→ Medicine.drug_detail
 ├── nutrition_do_eat ──────────→ Advice.nutrition_do_eat
-├── nutrition_recommend_meal ──→ Advice.nutrition_recommend_meal
+├── nutrition_recommend_eat ───→ Advice.nutrition_recommend_meal
 ├── nutrition_not_eat ─────────→ Advice.nutrition_not_eat
 ├── disease_prevention ────────→ Advice.disease_prevention
 └── associated_disease ────────→ IS_LINKED_WITH relationship
@@ -121,7 +121,7 @@ Dựa trên quá trình khởi tạo đồ thị thực tế (tháng 06/2026):
 
 Quy trình tự động hóa tích hợp dữ liệu yêu cầu thực thi tuần tự các bước sau:
 
-- Cấu hình biến môi trường (`NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`) trong `.env`.
+- Cấu hình biến môi trường (`NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `OPENAI_API_KEY`) trong `.env`.
 - Cài đặt thư viện: `pip install -r etl/requirements.txt`.
 - Khởi chạy Pipeline:
   - **Tiền xử lý (Cleaning):** `python3 -m etl.data_cleaning.preprocess`
