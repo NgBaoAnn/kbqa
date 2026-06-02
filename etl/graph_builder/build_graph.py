@@ -32,38 +32,36 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # Path to data
-DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "vietmedkg" / "data"
-CSV_FILE = DATA_DIR / "data_translated.csv"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "processed"
+CSV_FILE = DATA_DIR / "preprocessed_data.csv"
 
-# CSV column name → schema mapping
-# CSV columns (Vietnamese): tên_bệnh, mô_tả_bệnh, loại_bệnh, nguyên_nhân, ...
-# Graph properties (English): disease_name, disease_description, disease_category, ...
+# CSV column name → schema mapping (Now both are English because of preprocess.py)
 
 COL_MAP = {
     # Disease node
-    "tên_bệnh": "disease_name",
-    "mô_tả_bệnh": "disease_description",
-    "loại_bệnh": "disease_category",
-    "nguyên_nhân": "disease_cause",
+    "disease_name": "disease_name",
+    "disease_description": "disease_description",
+    "disease_category": "disease_category",
+    "disease_cause": "disease_cause",
     # Symptom node
-    "triệu_chứng": "disease_symptom",
-    "kiểm_tra": "check_method",
-    "đối_tượng_dễ_mắc_bệnh": "people_easy_get",
+    "disease_symptom": "disease_symptom",
+    "check_method": "check_method",
+    "people_easy_get": "people_easy_get",
     # Treatment node
-    "phương_pháp": "cure_method",
-    "khoa_điều_trị": "cure_department",
-    "tỉ_lệ_chữa_khỏi": "cure_probability",
+    "cure_method": "cure_method",
+    "cure_department": "cure_department",
+    "cure_probability": "cure_probability",
     # Medicine node
-    "đề_xuất_thuốc": "drug_recommend",
-    "thuốc_phổ_biến": "drug_common",
-    "thông_tin_thuốc": "drug_detail",
+    "drug_recommend": "drug_recommend",
+    "drug_common": "drug_common",
+    "drug_detail": "drug_detail",
     # Advice node
-    "nên_ăn_thực_phẩm_chứa": "nutrition_do_eat",
-    "không_nên_ăn_thực_phẩm_chứa": "nutrition_not_eat",
-    "đề_xuất_món_ăn": "nutrition_recommend_meal",
-    "cách_phòng_tránh": "disease_prevention",
+    "nutrition_do_eat": "nutrition_do_eat",
+    "nutrition_not_eat": "nutrition_not_eat",
+    "nutrition_recommend_eat": "nutrition_recommend_meal",
+    "disease_prevention": "disease_prevention",
     # Associated disease
-    "bệnh_đi_kèm": "associated_disease",
+    "associated_disease": "associated_disease",
 }
 
 
@@ -378,7 +376,7 @@ def main():
     csv_path = Path(args.csv) if args.csv else CSV_FILE
     if not csv_path.exists():
         log.error(f"CSV file not found: {csv_path}")
-        log.error("Run: git clone https://github.com/HySonLab/VietMedKG.git ai-engine/data/vietmedkg")
+        log.error("Please ensure the CSV file is located at data/processed/data_translated.csv")
         sys.exit(1)
 
     # Read data
