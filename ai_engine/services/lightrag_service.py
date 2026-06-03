@@ -1,7 +1,10 @@
-"""LightRAG Service — Core integration with the LightRAG framework.
+"""LightRAG Service — Semantic retrieval via Qdrant vector search (naive mode).
 
-Provides initialization and querying capabilities using LightRAG's
-graph-enhanced retrieval with Neo4j as the knowledge graph backend.
+Architecture:
+  - Câu hỏi mơ hồ → vector search trên Qdrant (chế độ «naive»)
+  - KHÔNG dùng LightRAG internal graph (graph đó trống, VietMedKG graph
+    được phục vụ bởi Cypher path riêng biệt)
+  - Embedding: bge-m3 (Ollama) → Qdrant Cloud (lightrag_vdb_chunks)
 """
 
 import asyncio
@@ -14,6 +17,7 @@ from ai_engine.config import (
     DEFAULT_QUERY_MODE,
     EMBEDDING_DIM,
     EMBEDDING_MODEL,
+    FORCE_LIGHTRAG_NAIVE_MODE,
     LIGHTRAG_DOC_STORAGE,
     LIGHTRAG_KG_STORAGE,
     LIGHTRAG_VECTOR_STORAGE,
@@ -29,6 +33,10 @@ logger = logging.getLogger(__name__)
 # ── Singleton instance ────────────────────────────────────────────────────
 _lightrag_instance = None
 _init_lock = asyncio.Lock()
+
+# Effective query mode used by this service.
+# Always «naive» unless FORCE_LIGHTRAG_NAIVE_MODE is explicitly set to false.
+EFFECTIVE_QUERY_MODE = "naive" if FORCE_LIGHTRAG_NAIVE_MODE else DEFAULT_QUERY_MODE
 
 
 async def get_lightrag_instance():
@@ -57,12 +65,11 @@ async def _create_lightrag_instance():
     """Create and configure a new LightRAG instance.
 
     Returns:
-        A configured LightRAG instance with Neo4j graph storage.
+        A configured LightRAG instance wired to Qdrant for vector storage.
     """
     try:
-        from lightrag import LightRAG, QueryParam
-        from lightrag.llm.ollama import ollama_embed, ollama_model_complete
-        from lightrag.kg.neo4j_impl import Neo4JStorage
+        from lightrag import LightRAG
+        from lightrag.utils import EmbeddingFunc
     except ImportError as e:
         logger.error(
             "LightRAG is not installed. Run: pip install 'lightrag-hku[api]'\n"
@@ -81,52 +88,45 @@ async def _create_lightrag_instance():
     logger.info("  Vector Storage: %s", LIGHTRAG_VECTOR_STORAGE)
     logger.info("  LLM Model: %s", LLM_MODEL_NAME)
     logger.info("  Embedding Model: %s", EMBEDDING_MODEL)
+    logger.info("  Query Mode (enforced): %s", EFFECTIVE_QUERY_MODE)
 
     # Import the LLM/embedding wrapper functions from our service
     from ai_engine.services.llm_service import embedding_func, llm_model_func
 
-    rag = LightRAG(
-        working_dir=str(working_dir),
-        llm_model_func=llm_model_func,
-        embedding_func=EmbeddingFunc(
-            embedding_dim=EMBEDDING_DIM,
-            max_token_size=8192,
-            func=embedding_func,
-        ),
-        graph_storage=LIGHTRAG_KG_STORAGE,
-        vector_storage=LIGHTRAG_VECTOR_STORAGE,
-        kv_storage=LIGHTRAG_DOC_STORAGE,
+    # model_name is required by QdrantVectorDBStorage to generate the
+    # correct collection name suffix (e.g. lightrag_vdb_chunks_bge_m3_1024d).
+    # Without it, the suffix is missing and Qdrant may not find the collection.
+    emb_func = EmbeddingFunc(
+        embedding_dim=EMBEDDING_DIM,
+        max_token_size=8192,
+        func=embedding_func,
+        # NOTE: model_name is intentionally left absent here so the Qdrant
+        # collection name stays «lightrag_vdb_chunks» (no suffix) — matching
+        # the collection created during ingestion with the same setup.
+        # If you want suffix isolation, set model_name=EMBEDDING_MODEL here
+        # AND re-run the ingestion script to rebuild the collection.
     )
 
-    # Configure Neo4j connection if using Neo4J storage
+    # Configure Neo4j env vars before LightRAG reads them
     if LIGHTRAG_KG_STORAGE == "Neo4JStorage":
         os.environ.setdefault("NEO4J_URI", NEO4J_URI)
         os.environ.setdefault("NEO4J_USERNAME", NEO4J_USERNAME)
         os.environ.setdefault("NEO4J_PASSWORD", NEO4J_PASSWORD)
         logger.info("  Neo4j URI: %s", NEO4J_URI)
 
+    rag = LightRAG(
+        working_dir=str(working_dir),
+        llm_model_func=llm_model_func,
+        embedding_func=emb_func,
+        graph_storage=LIGHTRAG_KG_STORAGE,
+        vector_storage=LIGHTRAG_VECTOR_STORAGE,
+        kv_storage=LIGHTRAG_DOC_STORAGE,
+    )
+
     logger.info("Initializing LightRAG storages...")
     await rag.initialize_storages()
     logger.info("LightRAG initialized successfully.")
     return rag
-
-
-# ── Import EmbeddingFunc helper ───────────────────────────────────────────
-try:
-    from lightrag.utils import EmbeddingFunc
-except ImportError:
-    # Fallback: define a simple dataclass if LightRAG is not installed yet
-    from dataclasses import dataclass
-    from typing import Callable
-
-    @dataclass
-    class EmbeddingFunc:
-        embedding_dim: int
-        max_token_size: int
-        func: Callable
-
-        def __call__(self, *args, **kwargs):
-            return self.func(*args, **kwargs)
 
 
 # ── Query Interface ──────────────────────────────────────────────────────
@@ -137,40 +137,45 @@ async def query(
     mode: str | None = None,
     only_need_context: bool = False,
 ) -> dict[str, Any]:
-    """Query LightRAG with a natural language question.
+    """Query LightRAG with a natural language question (naive / vector-only).
+
+    This service ALWAYS uses «naive» mode (pure Qdrant vector search) because:
+      1. LightRAG's internal entity graph is empty — only VietMedKG Neo4j graph
+         contains real medical data, and it is served by the Cypher path.
+      2. Qdrant Cloud holds all disease chunk embeddings ingested via
+         ingest_vectors_direct.py — retrieval is fast and accurate.
 
     Args:
         question: The user's question in natural language.
-        mode: Query mode — one of: naive, local, global, hybrid, mix.
-              Defaults to DEFAULT_QUERY_MODE from config.
+        mode: Ignored when FORCE_LIGHTRAG_NAIVE_MODE=true (default).
+              Respected only when FORCE_LIGHTRAG_NAIVE_MODE=false.
         only_need_context: If True, returns only the retrieved context
                           without LLM synthesis.
 
     Returns:
         Dict with keys:
             - answer: The synthesized natural language answer.
-            - mode: The query mode used.
+            - mode: The query mode actually used.
             - success: Whether the query was successful.
             - error: Error message if unsuccessful (optional).
     """
-    mode = mode or DEFAULT_QUERY_MODE
+    # Enforce naive mode — override caller's mode if flag is set
+    effective_mode = EFFECTIVE_QUERY_MODE if FORCE_LIGHTRAG_NAIVE_MODE else (mode or DEFAULT_QUERY_MODE)
 
-    # Validate mode
-    valid_modes = {"naive", "local", "global", "hybrid", "mix"}
-    if mode not in valid_modes:
-        return {
-            "answer": "",
-            "mode": mode,
-            "success": False,
-            "error": f"Invalid query mode: '{mode}'. Must be one of: {valid_modes}",
-        }
+    if mode and mode != effective_mode:
+        logger.info(
+            "Query mode override: '%s' → '%s' (FORCE_LIGHTRAG_NAIVE_MODE=true). "
+            "To disable, set FORCE_LIGHTRAG_NAIVE_MODE=false in .env.",
+            mode,
+            effective_mode,
+        )
 
     try:
         from lightrag import QueryParam
     except ImportError:
         return {
             "answer": "",
-            "mode": mode,
+            "mode": effective_mode,
             "success": False,
             "error": "LightRAG is not installed.",
         }
@@ -178,24 +183,30 @@ async def query(
     rag = await get_lightrag_instance()
 
     try:
-        logger.info("Querying LightRAG (mode=%s): %s", mode, question[:100])
+        logger.info(
+            "Querying LightRAG (mode=%s): %s", effective_mode, question[:100]
+        )
 
-        param = QueryParam(mode=mode, only_need_context=only_need_context)
+        param = QueryParam(mode=effective_mode, only_need_context=only_need_context)
         result = await rag.aquery(question, param=param)
 
-        logger.info("Query completed (mode=%s, answer_length=%d)", mode, len(str(result)))
+        logger.info(
+            "Query completed (mode=%s, answer_length=%d)",
+            effective_mode,
+            len(str(result)),
+        )
 
         return {
             "answer": str(result),
-            "mode": mode,
+            "mode": effective_mode,
             "success": True,
         }
 
     except Exception as e:
-        logger.error("LightRAG query failed (mode=%s): %s", mode, e)
+        logger.error("LightRAG query failed (mode=%s): %s", effective_mode, e)
         return {
             "answer": "",
-            "mode": mode,
+            "mode": effective_mode,
             "success": False,
             "error": str(e),
         }
@@ -205,14 +216,18 @@ async def health_check() -> dict[str, Any]:
     """Check the health status of the LightRAG service.
 
     Returns:
-        Dict with status information for LightRAG, LLM, and storage.
+        Dict with status information for LightRAG, LLM, embedding, and storage.
     """
+    qdrant_url = os.environ.get("QDRANT_URL", "(not set)")
     health = {
         "lightrag": "unknown",
+        "query_mode": EFFECTIVE_QUERY_MODE,
+        "force_naive": FORCE_LIGHTRAG_NAIVE_MODE,
         "llm_server": "unknown",
         "embedding_server": "unknown",
         "graph_storage": LIGHTRAG_KG_STORAGE,
         "vector_storage": LIGHTRAG_VECTOR_STORAGE,
+        "qdrant_url": qdrant_url[:40] + "..." if len(qdrant_url) > 40 else qdrant_url,
     }
 
     # Check LLM
