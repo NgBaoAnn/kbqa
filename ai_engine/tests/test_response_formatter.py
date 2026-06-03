@@ -28,8 +28,8 @@ class TestClassifyResponseType:
 
     def test_table_on_list_response(self):
         """Should classify as table when answer contains list items."""
-        answer = "Triệu chứng:\n- Sốt\n- Ho\n- Khó thở"
-        assert classify_response_type("triệu chứng viêm phổi", answer) == "table"
+        answer = "Triệu chứng:\n- Sốt\n- Ho\n- Đau đầu"
+        assert classify_response_type("triệu chứng cảm cúm", answer) == "table"
 
     def test_text_on_explanation(self):
         """Should classify as text for simple explanations."""
