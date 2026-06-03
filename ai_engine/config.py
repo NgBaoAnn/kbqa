@@ -40,8 +40,14 @@ LIGHTRAG_KG_STORAGE = os.getenv("LIGHTRAG_KG_STORAGE", "Neo4JStorage")
 LIGHTRAG_VECTOR_STORAGE = os.getenv("LIGHTRAG_VECTOR_STORAGE", "NanoVectorDBStorage")
 LIGHTRAG_DOC_STORAGE = os.getenv("LIGHTRAG_DOC_STORAGE", "JsonKVStorage")
 
-# Query mode options: naive | local | global | hybrid | mix
-DEFAULT_QUERY_MODE = os.getenv("DEFAULT_QUERY_MODE", "hybrid")
+# Query mode for the LightRAG semantic path.
+# «naive» = pure Qdrant vector search only (no LightRAG-internal graph).
+# The VietMedKG graph is served exclusively via the Cypher path.
+DEFAULT_QUERY_MODE = os.getenv("DEFAULT_QUERY_MODE", "naive")
+
+# Enforce naive mode regardless of caller override.
+# Change to False only if LightRAG's own internal graph is populated.
+FORCE_LIGHTRAG_NAIVE_MODE = os.getenv("FORCE_LIGHTRAG_NAIVE_MODE", "true").lower() == "true"
 
 # ── Neo4j AuraDB ──────────────────────────────────────────────────────────
 NEO4J_URI = os.getenv("NEO4J_URI", "")
