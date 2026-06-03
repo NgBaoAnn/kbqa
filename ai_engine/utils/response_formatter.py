@@ -8,6 +8,11 @@ import logging
 import re
 from typing import Any
 
+from ai_engine.services.intent_classifier import (
+    detect_emergency_intent,
+    detect_list_intent,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── Medical disclaimer (always appended) ──────────────────────────────────
@@ -44,6 +49,10 @@ DANGER_KEYWORDS = [
 def classify_response_type(question: str, answer: str) -> str:
     """Classify the response type based on question and answer content.
 
+    Uses intent_classifier for strong regex-based emergency detection on
+    the question, then falls back to keyword matching on the answer for
+    additional coverage. Combines both approaches for best accuracy.
+
     Args:
         question: The original user question.
         answer: The LightRAG synthesized answer.
@@ -51,18 +60,25 @@ def classify_response_type(question: str, answer: str) -> str:
     Returns:
         One of: 'warning', 'table', 'text'.
     """
-    combined = (question + " " + answer).lower()
+    # 1. Priority: Detect emergency from QUESTION (intent_classifier — stronger regex patterns)
+    if detect_emergency_intent(question):
+        logger.info("Emergency intent detected via intent_classifier (question)")
+        return "warning"
 
-    # Check for dangerous symptoms → warning
+    # 2. Fallback: Detect emergency from ANSWER (keyword matching)
+    combined = (question + " " + answer).lower()
     for keyword in DANGER_KEYWORDS:
         if keyword in combined:
+            logger.info("Emergency keyword detected: '%s'", keyword)
             return "warning"
 
-    # Check for list-like content → table
-    list_indicators = [
-        # Vietnamese list patterns
-        r"(?:triệu chứng|thuốc|bệnh|phương pháp|thực phẩm).*?:",
-    ]
+    # 3. Detect list intent from question + verify answer has list structure
+    if detect_list_intent(question):
+        list_items = re.findall(r"^[\s]*[-•\d.]+\s+\S", answer, re.MULTILINE)
+        if len(list_items) >= 2:
+            return "table"
+
+    # 4. Check for list-like content in answer → table
     answer_lower = answer.lower()
 
     # Count items that look like a list (lines starting with - or • or numbers)

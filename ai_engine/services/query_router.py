@@ -116,6 +116,9 @@ def _extract_disease_name(question: str) -> str | None:
             name = match.group(1).strip().rstrip(".")
             # Clean up common prefixes
             name = re.sub(r"^(?:bệnh|bị)\s+", "", name, flags=re.IGNORECASE)
+            # Remove trailing words like 'không' or brackets
+            name = re.sub(r"\s+không$", "", name, flags=re.IGNORECASE)
+            name = name.strip("[]")
             if len(name) >= 2:
                 return name
 
@@ -151,38 +154,18 @@ def route_query(question: str) -> dict:
             }
 
     # ── Priority 2: Exact entity lookup → Cypher ─────────────────────────
-    disease_name = _extract_disease_name(question)
-    if disease_name:
-        # Determine the specific query type
-        query_type = "profile"  # default
-
-        if re.search(r"triệu chứng|symptoms?", q_lower):
-            query_type = "symptoms"
-        elif re.search(r"thuốc|drugs?|medicines?|điều trị bằng|dùng thuốc", q_lower):
-            query_type = "medicine"
-        elif re.search(r"điều trị|treat|cure|phương pháp", q_lower):
-            query_type = "treatment"
-        elif re.search(r"nên ăn|không nên ăn|dinh dưỡng|nutrition", q_lower):
-            query_type = "advice"
-        elif re.search(r"phòng tránh|phòng ngừa|prevent", q_lower):
-            query_type = "prevention"
-        elif re.search(r"khoa|department", q_lower):
-            query_type = "department"
-        elif re.search(r"là gì|what is|mô tả|describe", q_lower):
-            query_type = "profile"
-
-        logger.info(
-            "Route → CYPHER (exact lookup, type=%s, entity='%s'): %s",
-            query_type,
-            disease_name,
-            question[:80],
-        )
-        return {
-            "path": QueryPath.CYPHER,
-            "disease_name": disease_name,
-            "query_type": query_type,
-            "reason": f"Tra cứu chính xác '{disease_name}' → Cypher trực tiếp",
-        }
+    # If the question matches any lookup or profile pattern, route to CYPHER.
+    all_cypher_patterns = EXACT_LOOKUP_PATTERNS_VI + EXACT_LOOKUP_PATTERNS_EN + PROFILE_PATTERNS
+    
+    for pattern in all_cypher_patterns:
+        if re.search(pattern, question, re.IGNORECASE):
+            logger.info("Route → CYPHER (exact lookup pattern matched): %s", question[:80])
+            return {
+                "path": QueryPath.CYPHER,
+                "disease_name": None,  # Not needed for LLM Text2Cypher
+                "query_type": None,    # Not needed for LLM Text2Cypher
+                "reason": "Matched structured lookup pattern → Cypher (LLM generated)",
+            }
 
     # ── Priority 3: Everything else → LightRAG ───────────────────────────
     logger.info("Route → LIGHTRAG (semantic/thematic): %s", question[:80])
