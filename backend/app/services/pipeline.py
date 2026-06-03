@@ -1,4 +1,4 @@
-"""Query Pipeline Orchestrator — Phương án C: Hybrid Architecture.
+"""Query Pipeline Orchestrator — Hybrid Architecture (Phương án C).
 
 Dual-path pipeline:
     ┌─────────────────┐
@@ -9,17 +9,19 @@ Dual-path pipeline:
     │  Query Router    │ — Phân tích câu hỏi
     └───┬─────────┬───┘
         │         │
-   ┌────▼───┐ ┌──▼──────────┐
-   │ CYPHER │ │  LIGHTRAG    │
-   │ Path   │ │  Path        │
-   │        │ │              │
-   │ Build  │ │ Dual-level   │
-   │ Cypher │ │ Retrieval    │
-   │   ↓    │ │     ↓        │
-   │ Neo4j  │ │ LLM Synth    │
-   │   ↓    │ │     ↓        │
-   │ Format │ │ Format       │
-   └───┬────┘ └──┬──────────┘
+   ┌────▼───┐ ┌──▼──────────────────────┐
+   │ CYPHER │ │  LIGHTRAG (naive)         │
+   │ Path   │ │  Vector search on Qdrant  │
+   │        │ │                           │
+   │ Text2  │ │  bge-m3 embed(question)   │
+   │ Cypher │ │    → top-k chunks         │
+   │   ↓    │ │    → LLM synthesis        │
+   │ Neo4j  │ │                           │
+   │ (KBQA  │ │  NOTE: LightRAG's own     │
+   │  graph)│ │  internal graph is NOT    │
+   │   ↓    │ │  used. VietMedKG graph is │
+   │ Format │ │  served by Cypher path.   │
+   └───┬────┘ └──┬──────────────────────┘
        │         │
     ┌──▼─────────▼──┐
     │  API Response   │
@@ -33,8 +35,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Pipeline-level timeout (seconds)
-PIPELINE_TIMEOUT_SECONDS = 60
+# Pipeline-level timeout (seconds).
+# Naive Qdrant search + LLM synthesis can take up to ~90s on cold start.
+PIPELINE_TIMEOUT_SECONDS = 120
+
+# LightRAG semantic path always uses naive (vector-only) mode.
+# The VietMedKG graph is served exclusively by the Cypher path.
+_LIGHTRAG_MODE = "naive"
 
 # User-facing messages per language
 _USER_MESSAGES = {
@@ -156,10 +163,11 @@ async def _run_pipeline_inner(
                 start_time=start_time,
             )
         else:
+            # Semantic path — always naive (Qdrant vector search)
             return await _execute_lightrag_path(
                 question=question,
                 language=language,
-                mode=mode,
+                mode=_LIGHTRAG_MODE,
                 start_time=start_time,
             )
 
@@ -205,10 +213,11 @@ async def _execute_cypher_path(
     except Exception as e:
         elapsed_ms = (time.time() - start_time) * 1000
         logger.error("LLM failed to generate Cypher: %s", e)
+        logger.info("Falling back to LightRAG (naive mode)...")
         return await _execute_lightrag_path(
             question=question,
             language=language,
-            mode=None,
+            mode=_LIGHTRAG_MODE,
             start_time=start_time,
         )
 
@@ -216,10 +225,11 @@ async def _execute_cypher_path(
     is_valid, validation_error = validate_cypher(cypher)
     if not is_valid:
         logger.warning("Cypher validation failed: %s", validation_error)
+        logger.info("Falling back to LightRAG (naive mode)...")
         return await _execute_lightrag_path(
             question=question,
             language=language,
-            mode=None,
+            mode=_LIGHTRAG_MODE,
             start_time=start_time,
         )
 
@@ -245,27 +255,27 @@ async def _execute_cypher_path(
         elapsed_ms = (time.time() - start_time) * 1000
         logger.error("Cypher execution failed: %s", e)
 
-        # Fallback to LightRAG if Cypher fails
-        logger.info("Falling back to LightRAG...")
+        # Fallback to LightRAG (naive mode) if Cypher fails
+        logger.info("Falling back to LightRAG (naive mode)...")
         return await _execute_lightrag_path(
             question=question,
             language=language,
-            mode=None,
+            mode=_LIGHTRAG_MODE,
             start_time=start_time,
         )
 
     elapsed_ms = (time.time() - start_time) * 1000
 
-    # No results → fallback to LightRAG for a semantic answer
+    # No results → fallback to LightRAG (naive mode) for a semantic answer
     if not records:
         logger.info(
-            "Cypher returned 0 records for '%s'. Falling back to LightRAG.",
+            "Cypher returned 0 records for '%s'. Falling back to LightRAG (naive mode).",
             question[:50],
         )
         return await _execute_lightrag_path(
             question=question,
             language=language,
-            mode=None,
+            mode=_LIGHTRAG_MODE,
             start_time=start_time,
         )
 
@@ -334,9 +344,13 @@ async def _execute_lightrag_path(
     mode: str | None,
     start_time: float,
 ) -> dict[str, Any]:
-    """Execute the LightRAG path — graph-enhanced semantic retrieval.
+    """Execute the LightRAG semantic path — pure Qdrant vector search (naive).
 
-    Advantages: Handles vague queries, multi-hop reasoning, thematic questions.
+    Uses bge-m3 embeddings stored in Qdrant Cloud to find the top-k most
+    similar disease chunks, then synthesizes an answer with the local LLM.
+
+    The VietMedKG graph (Neo4j) is NOT touched here — it is served by
+    the Cypher path.  mode is always forced to «naive» by lightrag_service.
     """
     from ai_engine.services import lightrag_service
     from ai_engine.utils.response_formatter import (
