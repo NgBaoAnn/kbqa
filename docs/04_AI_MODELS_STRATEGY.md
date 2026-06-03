@@ -1,6 +1,6 @@
 # 04. CHIẾN LƯỢC TRIỂN KHAI AI — AegisHealth KBQA
 
-> **AI Models Strategy: Local Open-source SLM + Prompt Engineering**
+> **AI Models Strategy: Local Open-source SLM + LightRAG + Embedding**
 
 ---
 
@@ -33,21 +33,38 @@ AegisHealth lựa chọn **Local Open-source SLM** dựa trên ba lý do chính:
 
 ### 2.1. Các ứng viên SLM phù hợp
 
-| Mô hình | Kích thước | Đặc điểm nổi bật | Mức độ phù hợp |
+> **Lưu ý về mô hình cho LightRAG**: LightRAG yêu cầu LLM mạnh hơn so với Text-to-Cypher truyền thống, vì cần thực hiện entity/relationship extraction từ documents. Khuyến nghị LLM ≥ 14B cho indexing, ≥ 7B cho querying.
+
+| Mô hình | Kích thước | Vai trò chính | Mức độ phù hợp |
 |---|---|---|---|
-| **Llama-3-8B-Instruct** | 8B params | Instruction-following mạnh, output format tuân thủ tốt, cộng đồng lớn | ⭐⭐⭐⭐⭐ |
-| **Qwen-2.5-7B-Instruct** | 7B params | Hỗ trợ đa ngôn ngữ tốt (bao gồm tiếng Việt), khả năng code generation mạnh | ⭐⭐⭐⭐⭐ |
-| **Mistral-7B-Instruct** | 7B params | Hiệu suất cao trong tầm kích thước, sliding window attention | ⭐⭐⭐⭐ |
-| **Phi-3-Mini-4K** | 3.8B params | Nhỏ gọn nhưng hiệu quả, phù hợp tài nguyên rất hạn chế | ⭐⭐⭐ |
+| **Qwen-2.5-14B-Instruct** | 14B params | LightRAG indexing + querying. Context 32K+, đa ngôn ngữ tốt | ⭐⭐⭐⭐⭐ |
+| **Qwen-2.5-7B-Instruct** | 7B params | Querying (fallback khi GPU hạn chế). Hỗ trợ tiếng Việt tốt | ⭐⭐⭐⭐ |
+| **Llama-3-8B-Instruct** | 8B params | Querying. Output format tuân thủ tốt, cộng đồng lớn | ⭐⭐⭐⭐ |
+| **Qwen-2.5-32B-Instruct** | 32B params | Indexing chất lượng cao nhất (cần GPU mạnh) | ⭐⭐⭐⭐⭐ |
 
-### 2.2. Tiêu chí Đánh giá lựa chọn cuối
+### 2.2. Mô hình Embedding (Bắt buộc cho LightRAG)
 
-Mô hình được chọn sẽ dựa trên đánh giá thực nghiệm (benchmark) với các tiêu chí:
+| Mô hình | Chiều | Ngôn ngữ | Lý do lựa chọn |
+|---|---|---|---|
+| **BAAI/bge-m3** (đề xuất) | 1024 | Đa ngôn ngữ (bao gồm tiếng Việt) | Hiệu suất cao, hỗ trợ tiếng Việt tốt, khả năng dense+sparse retrieval |
+| text-embedding-3-large | 3072 | Đa ngôn ngữ | Chất lượng cao nhưng cần API OpenAI |
 
-1. **Cypher Generation Accuracy**: Tỷ lệ sinh Cypher hợp lệ và đúng ngữ nghĩa trên tập test.
-2. **Response Naturalness**: Chất lượng văn phong của câu trả lời tổng hợp.
-3. **Format Compliance**: Khả năng tuân thủ định dạng JSON output theo đúng specification.
-4. **Inference Speed**: Thời gian xử lý trung bình trên phần cứng mục tiêu.
+> **Quan trọng**: Embedding model phải được chọn TRƯỚC khi indexing và KHOMU phải thay đổi sau đó. Nếu đổi embedding model, cần rebuild toàn bộ vector index.
+
+### 2.3. Mô hình Reranker (Tùy chọn, khuyến nghị)
+
+| Mô hình | Lý do |
+|---|---|
+| **BAAI/bge-reranker-v2-m3** | Cải thiện đáng kể retrieval quality, hỗ trợ `mix` query mode |
+
+### 2.4. Tiêu chí Đánh giá
+
+Mô hình được đánh giá trên:
+
+1. **Entity Extraction Quality**: Tỷ lệ extract đúng entities/relationships từ VietMedKG documents.
+2. **Answer Relevance**: Chất lượng câu trả lời tổng hợp từ LightRAG queries.
+3. **Vietnamese Fluency**: Độ tự nhiên của câu trả lời tiếng Việt.
+4. **Inference Speed**: Thời gian xử lý trên phần cứng mục tiêu.
 
 ---
 
@@ -93,68 +110,38 @@ graph TB
 
 ## 4. Chiến lược Prompt Engineering
 
-### 4.1. Nguyên tắc Thiết kế Prompt
+### 4.1. Thay đổi với LightRAG
 
-```mermaid
-graph TB
-    A["System Prompt<br/>Thiết lập vai trò & ràng buộc"] --> B["Context Injection<br/>Cung cấp Graph Schema"]
-    B --> C["Few-shot Examples<br/>Các ví dụ mẫu"]
-    C --> D["Output Format Spec<br/>Định dạng đầu ra bắt buộc"]
-    D --> E["User Query<br/>Câu hỏi người dùng"]
+Với kiến trúc Hybrid mới, prompt engineering thay đổi đáng kể:
 
-    style A fill:#ffcdd2,stroke:#c62828
-    style B fill:#fff3e0,stroke:#e65100
-    style C fill:#e3f2fd,stroke:#1565c0
-    style D fill:#c8e6c9,stroke:#2e7d32
-    style E fill:#f3e5f5,stroke:#7b1fa2
-```
+| Thành phần | Kiến trúc cũ | Kiến trúc Hybrid mới |
+|---|---|---|
+| **Text-to-Cypher prompt** | Custom prompt + schema injection | **Không cần** — Cypher Builder sinh Cypher deterministic |
+| **Data-to-Text prompt** | Custom prompt + data context | **Không cần cho Cypher Path** — Result Formatter là template. LightRAG Path dùng built-in synthesis. |
+| **Entity extraction prompt** | Không có | **LightRAG tự quản lý** — built-in prompts cho entity/relationship extraction |
+| **Query synthesis prompt** | Không có | **LightRAG tự quản lý** — built-in prompts cho answer synthesis |
 
-### 4.2. System Prompt cho Text-to-Cypher (Bước 1)
+### 4.2. Cypher Path — Không cần LLM
 
-**Mục tiêu**: Ép LLM xuất ra câu lệnh Cypher hợp lệ, chỉ sử dụng các node/relationship/property có trong schema.
+Cypher Path sinh Cypher bằng **rule-based query builder** (không cần LLM), dựa trên:
+- Regex pattern matching (Query Router)
+- Schema VietMedKG đã định nghĩa sẵn
+- Template Cypher queries cho từng loại tra cứu
 
-```
-SYSTEM PROMPT — TEXT-TO-CYPHER
-═══════════════════════════════
+Điều này loại bỏ hoàn toàn bottleneck "LLM sinh Cypher sai" của kiến trúc cũ.
 
-## Vai trò
-Bạn là chuyên gia chuyển đổi câu hỏi ngôn ngữ tự nhiên thành
-câu lệnh Cypher cho Neo4j Graph Database.
+### 4.3. LightRAG Path — Prompts được quản lý bởi framework
 
-## Graph Schema
-Hệ thống có các Node Labels và Relationship Types sau:
+LightRAG sử dụng các prompt nội bộ cho:
+1. **Entity Extraction**: Extract entities và relationships từ documents
+2. **KG Profiling**: Sinh mô tả cho nodes và edges
+3. **Query Synthesis**: Tổng hợp câu trả lời từ retrieved context
 
-### Node Labels:
-- Disease (properties: name, description)
-- Symptom (properties: name)
-- Drug (properties: name, type)
+Các prompt này có thể được tùy chỉnh thông qua LightRAG's configuration nếu cần.
 
-### Relationship Types:
-- (Disease)-[:HAS_SYMPTOM]->(Symptom)
-- (Disease)-[:TREATED_BY]->(Drug)
+### 4.4. Legacy Prompts (lưu giữ để tham khảo)
 
-## Quy tắc BẮT BUỘC:
-1. CHỈ sử dụng Node Labels, Relationship Types, và Properties
-   được liệt kê ở trên.
-2. CHỈ trả về câu lệnh Cypher, KHÔNG kèm giải thích.
-3. Sử dụng MATCH-RETURN pattern.
-4. Tên thực thể trong query phải viết thường (lowercase).
-5. Đầu ra phải là Cypher hợp lệ, có thể thực thi trực tiếp.
-
-## Ví dụ:
-Q: "Triệu chứng của bệnh tiểu đường là gì?"
-A: MATCH (d:Disease {name: "diabetes"})-[:HAS_SYMPTOM]->(s:Symptom)
-   RETURN s.name AS symptom
-
-Q: "Thuốc nào có thể trị cảm cúm?"
-A: MATCH (d:Disease {name: "influenza"})-[:TREATED_BY]->(dr:Drug)
-   RETURN dr.name AS drug
-
-Q: "Bệnh nào có triệu chứng đau đầu và sốt?"
-A: MATCH (d:Disease)-[:HAS_SYMPTOM]->(s1:Symptom {name: "headache"}),
-         (d)-[:HAS_SYMPTOM]->(s2:Symptom {name: "fever"})
-   RETURN d.name AS disease
-```
+Các prompt cũ (Text-to-Cypher, Data-to-Text) vẫn được lưu trong `ai_engine/prompts/` để tham khảo nhưng **không được sử dụng runtime**.
 
 ### 4.3. System Prompt cho Data-to-Text & Intent Classification (Bước 3)
 

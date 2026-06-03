@@ -1,0 +1,452 @@
+[
+  {
+    "id": "GT-001",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Bệnh Tiểu Đường có triệu chứng gì?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Basic symptom lookup for Tiểu Đường"
+  },
+  {
+    "id": "GT-002",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Thuốc nào được kê đơn cho bệnh Cao Huyết Áp?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Medicine lookup via IS_PRESCRIBED"
+  },
+  {
+    "id": "GT-003",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Bệnh Viêm Phổi có những phương pháp điều trị nào?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Treatment lookup via HAS_TREATMENT"
+  },
+  {
+    "id": "GT-004",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Lời khuyên cho bệnh nhân bị Hen Suyễn là gì?",
+    "expected_response_type": "text",
+    "expected_path": "cypher",
+    "notes": "Advice lookup via HAS_ADVICE"
+  },
+  {
+    "id": "GT-005",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Bệnh Viêm Gan B có triệu chứng gì?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Symptom lookup for Viêm Gan B"
+  },
+  {
+    "id": "GT-006",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Thuốc điều trị bệnh Trầm Cảm là gì?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Medicine lookup for Trầm Cảm"
+  },
+  {
+    "id": "GT-007",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Bệnh Sốt Xuất Huyết được điều trị bằng cách nào?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Treatment lookup for Sốt Xuất Huyết"
+  },
+  {
+    "id": "GT-008",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Các triệu chứng của bệnh Gout là gì?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Symptom lookup for Gout"
+  },
+  {
+    "id": "GT-009",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Bệnh Parkinson cần uống thuốc gì?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Medicine lookup for Parkinson"
+  },
+  {
+    "id": "GT-010",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Lời khuyên dành cho người bệnh Tiểu Đường là gì?",
+    "expected_response_type": "text",
+    "expected_path": "cypher",
+    "notes": "Advice lookup for Tiểu Đường"
+  },
+  {
+    "id": "GT-011",
+    "category": "basic",
+    "lang": "en",
+    "question": "What are the symptoms of Viêm Dạ Dày?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "English question with Vietnamese disease name"
+  },
+  {
+    "id": "GT-012",
+    "category": "basic",
+    "lang": "en",
+    "question": "List all medicines prescribed for Suy Tim",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "English question for Suy Tim medicines"
+  },
+  {
+    "id": "GT-013",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Phương pháp điều trị bệnh Alzheimer?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Treatment lookup for Alzheimer"
+  },
+  {
+    "id": "GT-014",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Triệu chứng bệnh Viêm Khớp Dạng Thấp?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Symptom lookup for Viêm Khớp Dạng Thấp"
+  },
+  {
+    "id": "GT-015",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Thuốc nào dùng để chữa bệnh Động Kinh?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Medicine lookup for Động Kinh"
+  },
+  {
+    "id": "GT-016",
+    "category": "multi_hop",
+    "lang": "vi",
+    "question": "Bệnh nào có liên quan đến bệnh Tiểu Đường?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Linked diseases via IS_LINKED_WITH from Tiểu Đường"
+  },
+  {
+    "id": "GT-017",
+    "category": "multi_hop",
+    "lang": "vi",
+    "question": "Những bệnh nào có chung triệu chứng với bệnh Viêm Phổi?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Diseases sharing symptoms with Viêm Phổi via HAS_SYMPTOM"
+  },
+  {
+    "id": "GT-018",
+    "category": "multi_hop",
+    "lang": "vi",
+    "question": "Thuốc nào vừa điều trị Cao Huyết Áp vừa điều trị Suy Tim?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Shared medicines between two diseases"
+  },
+  {
+    "id": "GT-019",
+    "category": "multi_hop",
+    "lang": "vi",
+    "question": "Bệnh Tiểu Đường liên quan đến bệnh nào, và bệnh đó có triệu chứng gì?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Two-hop: Tiểu Đường -> IS_LINKED_WITH -> Disease -> HAS_SYMPTOM -> Symptom"
+  },
+  {
+    "id": "GT-020",
+    "category": "multi_hop",
+    "lang": "vi",
+    "question": "Có bệnh nào vừa có triệu chứng sốt vừa có triệu chứng ho không?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Find diseases with both symptom sốt and ho"
+  },
+  {
+    "id": "GT-021",
+    "category": "multi_hop",
+    "lang": "vi",
+    "question": "Liệt kê tất cả các bệnh liên quan đến bệnh Cao Huyết Áp và thuốc điều trị của chúng",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Linked diseases from Cao Huyết Áp with their medicines"
+  },
+  {
+    "id": "GT-022",
+    "category": "multi_hop",
+    "lang": "en",
+    "question": "Which diseases are linked to Suy Tim and what treatments do they have?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "English multi-hop: linked diseases from Suy Tim with treatments"
+  },
+  {
+    "id": "GT-023",
+    "category": "multi_hop",
+    "lang": "vi",
+    "question": "Bệnh Viêm Gan B và Viêm Gan C có chung triệu chứng nào?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Shared symptoms between two specific diseases"
+  },
+  {
+    "id": "GT-024",
+    "category": "multi_hop",
+    "lang": "vi",
+    "question": "Những bệnh nào dùng chung thuốc với bệnh Hen Suyễn?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Diseases sharing prescribed medicines with Hen Suyễn"
+  },
+  {
+    "id": "GT-025",
+    "category": "multi_hop",
+    "lang": "vi",
+    "question": "Triệu chứng nào xuất hiện ở cả bệnh Cảm Cúm và Viêm Phổi?",
+    "expected_response_type": "table",
+    "expected_path": "cypher",
+    "notes": "Shared symptoms between Cảm Cúm and Viêm Phổi"
+  },
+  {
+    "id": "GT-026",
+    "category": "stats",
+    "lang": "vi",
+    "question": "Có bao nhiêu loại bệnh trong hệ thống?",
+    "expected_response_type": "text",
+    "expected_path": "cypher",
+    "notes": "Count Disease nodes"
+  },
+  {
+    "id": "GT-027",
+    "category": "stats",
+    "lang": "vi",
+    "question": "Tổng số triệu chứng trong cơ sở dữ liệu là bao nhiêu?",
+    "expected_response_type": "text",
+    "expected_path": "cypher",
+    "notes": "Count Symptom nodes"
+  },
+  {
+    "id": "GT-028",
+    "category": "stats",
+    "lang": "vi",
+    "question": "Bệnh nào có nhiều triệu chứng nhất?",
+    "expected_response_type": "text",
+    "expected_path": "cypher",
+    "notes": "Disease with max HAS_SYMPTOM count"
+  },
+  {
+    "id": "GT-029",
+    "category": "stats",
+    "lang": "vi",
+    "question": "Thuốc nào được kê cho nhiều bệnh nhất?",
+    "expected_response_type": "text",
+    "expected_path": "cypher",
+    "notes": "Medicine with max IS_PRESCRIBED count"
+  },
+  {
+    "id": "GT-030",
+    "category": "stats",
+    "lang": "en",
+    "question": "How many medicines are in the knowledge base?",
+    "expected_response_type": "text",
+    "expected_path": "cypher",
+    "notes": "Count Medicine nodes"
+  },
+  {
+    "id": "GT-031",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Em bị tiểu đường thì phải làm sao ạ?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Informal Vietnamese — southern style"
+  },
+  {
+    "id": "GT-032",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Mẹ tôi bị cao huyết áp, có thuốc gì không bác sĩ?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Conversational Vietnamese asking about relative's condition"
+  },
+  {
+    "id": "GT-033",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Tui muốn biết viêm phổi chữa bằng cách nào vậy?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Southern Vietnamese dialect"
+  },
+  {
+    "id": "GT-034",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Cho mình hỏi bệnh hen suyễn có nguy hiểm không?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Informal question about disease severity"
+  },
+  {
+    "id": "GT-035",
+    "category": "multi_hop",
+    "lang": "vi",
+    "question": "Nếu bị tiểu đường thì dễ mắc thêm bệnh gì nữa?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Natural language multi-hop about linked diseases"
+  },
+  {
+    "id": "GT-036",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Bệnh sốt xuất huyết biểu hiện như thế nào?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Natural symptom query with different phrasing"
+  },
+  {
+    "id": "GT-037",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Tôi hay bị đau đầu và chóng mặt, có thể là bệnh gì?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Reverse lookup: symptoms to disease"
+  },
+  {
+    "id": "GT-038",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Cách phòng ngừa bệnh viêm gan B?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Prevention advice query"
+  },
+  {
+    "id": "GT-039",
+    "category": "multi_hop",
+    "lang": "vi",
+    "question": "Bệnh nào có triệu chứng giống cảm cúm nhưng nặng hơn?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Comparative natural language query"
+  },
+  {
+    "id": "GT-040",
+    "category": "basic",
+    "lang": "vi",
+    "question": "Người bị gout nên ăn uống thế nào?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Diet/lifestyle advice query"
+  },
+  {
+    "id": "GT-041",
+    "category": "edge_case",
+    "lang": "vi",
+    "question": "Bệnh Xyzabc123 có triệu chứng gì?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Non-existent disease entity — expect graceful handling"
+  },
+  {
+    "id": "GT-042",
+    "category": "edge_case",
+    "lang": "vi",
+    "question": "Thời tiết ngày mai thế nào?",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Out-of-domain: weather question"
+  },
+  {
+    "id": "GT-043",
+    "category": "edge_case",
+    "lang": "vi",
+    "question": "",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Empty question — expect validation error or fallback"
+  },
+  {
+    "id": "GT-044",
+    "category": "edge_case",
+    "lang": "vi",
+    "question": "Bệnh",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Ambiguous single-word query"
+  },
+  {
+    "id": "GT-045",
+    "category": "edge_case",
+    "lang": "en",
+    "question": "Tell me a joke about doctors",
+    "expected_response_type": "text",
+    "expected_path": "lightrag",
+    "notes": "Out-of-domain: entertainment request"
+  },
+  {
+    "id": "GT-046",
+    "category": "emergency",
+    "lang": "vi",
+    "question": "Tôi bị đau ngực dữ dội và khó thở, phải làm sao?",
+    "expected_response_type": "warning",
+    "expected_path": "lightrag",
+    "notes": "Emergency: chest pain + dyspnea — expect warning + call 115"
+  },
+  {
+    "id": "GT-047",
+    "category": "emergency",
+    "lang": "vi",
+    "question": "Con tôi bị sốt cao co giật, cần làm gì ngay?",
+    "expected_response_type": "warning",
+    "expected_path": "lightrag",
+    "notes": "Emergency: child with febrile seizure — expect urgent warning"
+  },
+  {
+    "id": "GT-048",
+    "category": "emergency",
+    "lang": "vi",
+    "question": "Tôi uống nhầm thuốc quá liều, giúp tôi với!",
+    "expected_response_type": "warning",
+    "expected_path": "lightrag",
+    "notes": "Emergency: drug overdose — expect poison control warning"
+  },
+  {
+    "id": "GT-049",
+    "category": "emergency",
+    "lang": "vi",
+    "question": "Bà tôi bị đột quỵ, mặt méo một bên, không nói được",
+    "expected_response_type": "warning",
+    "expected_path": "lightrag",
+    "notes": "Emergency: stroke symptoms — expect FAST protocol warning"
+  },
+  {
+    "id": "GT-050",
+    "category": "emergency",
+    "lang": "vi",
+    "question": "Tôi bị chảy máu không cầm được sau tai nạn",
+    "expected_response_type": "warning",
+    "expected_path": "lightrag",
+    "notes": "Emergency: uncontrolled bleeding — expect first aid + call 115"
+  }
+]

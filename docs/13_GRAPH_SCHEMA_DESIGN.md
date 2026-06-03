@@ -150,4 +150,75 @@ RETURN d2.disease_name AS linked_disease, s.disease_symptom AS symptoms;
 
 ---
 
-*Tài liệu này được biên soạn nhằm chuẩn hóa kiến trúc Data Engineering, phục vụ cho hệ thống AegisHealth.*
+## 7. So Sánh Với Schema Cũ (v1 Kaggle)
+
+| Tiêu chí | v1 (Kaggle) | v2 (VietMedKG) |
+|---|---|---|
+| **Ngôn ngữ data** | Tiếng Anh | **Tiếng Việt** 🇻🇳 |
+| **Số Node Labels** | 3 (Disease, Symptom, Drug) | **5** (Disease, Symptom, Treatment, Medicine, Advice) |
+| **Số Relationship Types** | 2 (HAS_SYMPTOM, TREATED_BY) | **5** (HAS_SYMPTOM, HAS_TREATMENT, IS_PRESCRIBED, HAS_ADVICE, IS_LINKED_WITH) |
+| **Quy mô** | ~573 nodes | **~40,000 nodes** |
+| **Thông tin/bệnh** | Tên + description | **18 trường** (triệu chứng, điều trị, thuốc, dinh dưỡng...) |
+| **Bệnh đi kèm** | ❌ Không có | ✅ IS_LINKED_WITH |
+| **Phù hợp KBQA tiếng Việt** | ❌ Cần dịch | ✅ Sẵn sàng |
+
+---
+
+## 8. Schema cho System Prompt
+
+```
+## Graph Schema (VietMedKG-based)
+Node Labels:
+- Disease (properties: disease_name, disease_description, disease_category, disease_cause)
+- Symptom (properties: disease_name, disease_symptom, check_method, people_easy_get)
+- Treatment (properties: disease_name, cure_method, cure_department, cure_probability)
+- Medicine (properties: disease_name, drug_detail, drug_common, drug_recommend)
+- Advice (properties: disease_name, nutrition_do_eat, nutrition_recommend_meal, nutrition_not_eat, disease_prevention)
+
+Relationship Types:
+- (Disease)-[:HAS_SYMPTOM]->(Symptom)
+- (Disease)-[:HAS_TREATMENT]->(Treatment)
+- (Disease)-[:IS_PRESCRIBED]->(Medicine)
+- (Disease)-[:HAS_ADVICE]->(Advice)
+- (Disease)-[:IS_LINKED_WITH]->(Disease)
+
+Constraints:
+- All nodes have disease_name as UNIQUE key
+- Disease.disease_name is Capitalized Vietnamese (e.g., "Viêm phổi")
+
+Design Notes:
+- Star schema: each Disease has its own Symptom/Treatment/Medicine/Advice nodes (1:1)
+- Symptom, Treatment data stored as text/lists in single properties
+- Use CONTAINS for fuzzy name matching
+- Data is in Vietnamese
+```
+
+---
+
+## 9. Kế Hoạch Mở Rộng (Tương Lai)
+
+```
+Hiện tại (v2 — VietMedKG):
+  Disease ──HAS_SYMPTOM──→ Symptom
+  Disease ──HAS_TREATMENT──→ Treatment
+  Disease ──IS_PRESCRIBED──→ Medicine
+  Disease ──HAS_ADVICE──→ Advice
+  Disease ──IS_LINKED_WITH──→ Disease
+
+Tương lai (v3) — THÊM từ ViMedNer + Kaggle:
+  Disease ──HAS_NER_ENTITY──→ NEREntity          ← ViMedNer entities
+  Disease ──TRANSLATED_AS──→ DiseaseEN           ← English mapping
+  Medicine ──HAS_SIDE_EFFECT──→ SideEffect       ← Enrich data
+```
+
+---
+
+## 10. Checklist Trước Khi Import
+
+- [ ] Tạo AuraDB instance (hoặc local Neo4j)
+- [ ] Tạo `.env` file (copy từ `.env.example`)
+- [ ] Chạy 5 lệnh `CREATE CONSTRAINT` (section 5.1)
+- [ ] Chạy `python ai_engine/scripts/import_vietmedkg.py --dry-run` (kiểm tra data)
+- [ ] Chạy `python ai_engine/scripts/import_vietmedkg.py --clear` (import thật)
+- [ ] Validate bằng query mẫu (section 6)
+- [ ] Cập nhật System Prompt cho Đội AI (section 8)

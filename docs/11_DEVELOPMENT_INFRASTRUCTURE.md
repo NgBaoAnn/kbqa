@@ -29,51 +29,56 @@ aegishealth-kbqa/
 │       ├── etl_pipeline.py
 │       └── load_to_neo4j.py
 │
-├── ai-engine/                      # 🧠 AI ENGINE — Tầng AI (xem Sơ đồ 1, Section 2.4 trong 02_SYSTEM_ARCHITECTURE.md)
+├── ai_engine/                      # 🧠 AI ENGINE — Hybrid Pipeline (LightRAG + Cypher)
 │   ├── __init__.py
-│   ├── config.py                   # AI-specific config (model name, timeout, etc.)
-│   ├── prompts/                    # System Prompts (versioned)
-│   │   ├── text_to_cypher.txt      # System prompt — Bước 1: Generate (NL → Cypher)
-│   │   └── data_to_text.txt        # System prompt — Bước 3: Synthesize (Data → NL)
+│   ├── config.py                   # Unified config: LLM, Embedding, LightRAG, Neo4j
+│   ├── prompts/                    # Legacy Prompts (không sử dụng runtime)
+│   │   ├── text_to_cypher.md      # [LEGACY] System prompt — Text-to-Cypher
+│   │   └── data_to_text.md        # [LEGACY] System prompt — Data-to-Text
 │   ├── services/                   # AI core services
 │   │   ├── __init__.py
-│   │   ├── llm_service.py          # SLM interaction (Ollama/vLLM — OpenAI-compatible API)
-│   │   │                           #   → Text-to-Cypher (Generate Phase)
-│   │   │                           #   → Data-to-Text  (Synthesize Phase)
-│   │   └── intent_classifier.py    # Intent Classifier & Response Typer
-│   │                               #   → Phân loại response_type: table | text | warning
+│   │   ├── llm_service.py          # LLM + Embedding wrapper (Ollama/vLLM — OpenAI-compatible)
+│   │   ├── lightrag_service.py     # LightRAG Core — singleton, query interface, health check
+│   │   ├── query_router.py         # Query Router — phân loại Cypher vs LightRAG path
+│   │   ├── cypher_query_builder.py # Cypher Builder — sinh/format Cypher theo VietMedKG schema
+│   │   ├── indexing_service.py     # Indexing Service — VietMedKG CSV → text documents
+│   │   └── intent_classifier.py    # Intent Classifier — emergency/list/explain detection
 │   ├── utils/                      # AI utilities
 │   │   ├── __init__.py
-│   │   ├── cypher_validator.py     # Cypher syntax checker & schema validator
-│   │   └── sanitizer.py           # Cypher sanitization (chặn DELETE/DROP/MERGE write)
+│   │   ├── response_formatter.py  # Response Formatter — LightRAG output → API response format
+│   │   ├── cypher_validator.py     # [LEGACY] Cypher syntax checker
+│   │   └── sanitizer.py           # [LEGACY] Cypher sanitization
+│   ├── scripts/                    # CLI scripts
+│   │   ├── import_vietmedkg.py     # Nhập VietMedKG vào Neo4j (Data team)
+│   │   └── index_documents.py      # Indexing VietMedKG → LightRAG (AI team)
 │   ├── eval/                       # Evaluation & Benchmarking
-│   │   ├── golden_test_set.json    # 50 cặp (question, expected_cypher) benchmark
+│   │   ├── golden_test_set.json    # 50 cặp (question, expected) benchmark
 │   │   ├── eval_golden_test.py     # Script chạy benchmark tự động
 │   │   └── test_prompt.py          # Script test prompt thủ công
 │   └── tests/                      # Unit tests cho AI Engine
 │       ├── __init__.py
+│       ├── test_lightrag_service.py    # Tests cho LightRAG config & pipeline
+│       ├── test_response_formatter.py  # Tests cho response classification & formatting
 │       ├── test_llm_service.py
-│       ├── test_intent_classifier.py
-│       ├── test_cypher_validator.py
 │       └── test_pipeline.py
 │
-├── backend/                        # ⚙️ BACKEND MIDDLEWARE — FastAPI (xem Sơ đồ 1, Section 3.2 trong 02_SYSTEM_ARCHITECTURE.md)
+├── backend/                        # ⚙️ BACKEND MIDDLEWARE — FastAPI + Hybrid Pipeline
 │   ├── app/
 │   │   ├── __init__.py
-│   │   ├── main.py                 # FastAPI entry point
-│   │   ├── config.py               # Environment configuration (DB, CORS, etc.)
-│   │   ├── routers/                # Request Router & Validator
+│   │   ├── main.py                 # FastAPI entry point (lifespan, CORS, routers)
+│   │   ├── config.py               # Environment configuration (API, DB, CORS, Rate Limit)
+│   │   ├── routers/                # API Endpoints
 │   │   │   ├── __init__.py
-│   │   │   ├── query.py            # POST /api/v1/query — điều phối pipeline
-│   │   │   ├── health.py           # GET  /api/v1/health
-│   │   │   └── schema.py           # GET  /api/v1/schema
+│   │   │   ├── query.py            # POST /api/v1/query — Hybrid pipeline orchestration
+│   │   │   ├── health.py           # GET  /api/v1/health — Multi-service health check
+│   │   │   └── schema.py           # GET  /api/v1/schema — Neo4j graph introspection
 │   │   ├── services/
 │   │   │   ├── __init__.py
-│   │   │   ├── pipeline.py         # Query Pipeline Orchestrator
-│   │   │   │                       #   → Điều phối: AI Engine ↔ Data Layer
-│   │   │   │                       #   → Retry logic, fallback, error routing
-│   │   │   └── graph_service.py    # 🗄️ DATA LAYER bridge — Neo4j AuraDB
-│   │   │                           #   → Kết nối neo4j+s://, execute Cypher, connection pool
+│   │   │   ├── pipeline.py         # Hybrid Pipeline Orchestrator (Phương án C)
+│   │   │   │                       #   → Query Router → Cypher Path / LightRAG Path
+│   │   │   │                       #   → Auto fallback Cypher → LightRAG
+│   │   │   └── graph_service.py    # Neo4j AuraDB service
+│   │   │                           #   → Cypher execution, schema introspection, health check
 │   │   └── models/
 │   │       ├── __init__.py
 │   │       ├── request.py          # Pydantic request models (QueryRequest)
@@ -126,7 +131,7 @@ aegishealth-kbqa/
 > |---|---|---|
 > | 🖥️ **CLIENT LAYER** | `web-client/` + `mobile-client/` | React SPA + Flutter App |
 > | ⚙️ **BACKEND MIDDLEWARE** | `backend/` | FastAPI Gateway + Pipeline Orchestrator + Request Router |
-> | 🧠 **AI ENGINE** | `ai-engine/` | LLM Service (Text-to-Cypher, Data-to-Text) + Intent Classifier |
+> | 🧠 **AI ENGINE** | `ai_engine/` | LLM Service (Text-to-Cypher, Data-to-Text) + Intent Classifier |
 > | 🗄️ **DATA LAYER** | `data/` (ETL) + `backend/app/services/graph_service.py` (runtime bridge tới Neo4j AuraDB cloud) |
 >
 > `pipeline.py` nằm trong `backend/` vì theo sơ đồ kiến trúc, **Query Pipeline Orchestrator** thuộc tầng Backend Middleware — nó **điều phối** giữa AI Engine và Data Layer, không phải là thành phần AI thuần túy.

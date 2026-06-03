@@ -25,7 +25,7 @@
 
 | Task ID | Tên Công việc | Assignee | DoD | Deps | Ngày target |
 |---|---|---|---|---|---|
-| M1-DAT-01 | Khởi tạo monorepo GitHub (folder structure, `.gitignore`, branches) | [Data Lead] | Repo có `docs/`, `data/`, `ai-engine/`, `backend/`, `web-client/`, `mobile-client/`; branch `main` + `develop` | — | Ngày 1 |
+| M1-DAT-01 | Khởi tạo monorepo GitHub (folder structure, `.gitignore`, branches) | [Data Lead] | Repo có `docs/`, `data/`, `ai_engine/`, `backend/`, `web-client/`, `mobile-client/`; branch `main` + `develop` | — | Ngày 1 |
 | M1-DAT-02 | Tạo tài khoản Neo4j AuraDB Free Tier & ghi nhận URI | [Data Dev] | AuraDB instance OK, URI `neo4j+s://...` documented, `.env.example` có template | — | Ngày 1–2 |
 | M1-DAT-03 | Tải datasets Kaggle (Symptom2Disease.csv, Medicine_Rec.csv) vào `data/raw/` | [Data Dev] | 2 file CSV trong `data/raw/`, báo cáo thống kê cơ bản (rows, cols, missing %) | — | Ngày 2 |
 | M2-DAT-01 | Thiết kế Graph Schema: Node Labels, Properties, Constraints, Indexes | [Data Lead] | File `schema.cypher`: 3 CONSTRAINT + 3 INDEX; tài liệu schema trên Markdown | — | Ngày 3–4 |
