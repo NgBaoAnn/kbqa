@@ -28,8 +28,8 @@ def build_cypher_query(query_type: str, disease_name: str | None = None) -> tupl
         Tuple of (cypher_query_string, parameters_dict).
     """
     if disease_name:
-        # Normalize: capitalize first letter of each word (VietMedKG convention)
-        disease_name = disease_name.strip().title()
+        # Normalize: capitalize only the first letter to match DB convention
+        disease_name = disease_name.strip().capitalize()
 
     builders = {
         "symptoms": _build_symptoms_query,
@@ -64,10 +64,7 @@ def _build_symptoms_query(disease_name: str | None) -> tuple[str, dict]:
     return (
         """
         MATCH (d:Disease {disease_name: $name})-[:HAS_SYMPTOM]->(s:Symptom)
-        RETURN d.disease_name AS disease,
-               s.disease_symptom AS symptoms,
-               s.check_method AS check_method,
-               s.people_easy_get AS risk_group
+        RETURN s.disease_symptom AS symptoms, s.check_method AS check
         """,
         {"name": disease_name},
     )
@@ -270,7 +267,7 @@ def _safe(value: object) -> str:
 
 def _fmt_symptoms(name: str | None, r: dict, _records: list) -> str:
     symptoms = _safe(r.get("symptoms"))
-    check = _safe(r.get("check_method"))
+    check = _safe(r.get("check"))
     risk = _safe(r.get("risk_group"))
 
     parts = [f"Bệnh {name or r.get('disease', 'N/A')} có các triệu chứng sau:"]
