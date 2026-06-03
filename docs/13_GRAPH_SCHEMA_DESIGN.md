@@ -26,7 +26,7 @@ Luồng xử lý dữ liệu (Data Flow) trong hệ thống được vận hành
 ```mermaid
 graph TD
     A[Raw Data: data/raw/raw_data.csv] -->|Data Cleaning| B(preprocess.py: Chuẩn hóa dữ liệu và tên cột)
-    B --> C[Cleaned Data: processed/preprocessed_data.csv]
+    B --> C[Cleaned Data: data/processed/preprocessed_data.csv]
     C -->|Extract Triples| D(make_triples.py)
     C -->|Load to Neo4j| E(build_graph.py)
     
