@@ -95,7 +95,7 @@ async def _create_lightrag_instance():
         ),
         graph_storage=LIGHTRAG_KG_STORAGE,
         vector_storage=LIGHTRAG_VECTOR_STORAGE,
-        doc_storage=LIGHTRAG_DOC_STORAGE,
+        kv_storage=LIGHTRAG_DOC_STORAGE,
     )
 
     # Configure Neo4j connection if using Neo4J storage
@@ -105,13 +105,15 @@ async def _create_lightrag_instance():
         os.environ.setdefault("NEO4J_PASSWORD", NEO4J_PASSWORD)
         logger.info("  Neo4j URI: %s", NEO4J_URI)
 
+    logger.info("Initializing LightRAG storages...")
+    await rag.initialize_storages()
     logger.info("LightRAG initialized successfully.")
     return rag
 
 
 # ── Import EmbeddingFunc helper ───────────────────────────────────────────
 try:
-    from lightrag import EmbeddingFunc
+    from lightrag.utils import EmbeddingFunc
 except ImportError:
     # Fallback: define a simple dataclass if LightRAG is not installed yet
     from dataclasses import dataclass
@@ -122,6 +124,9 @@ except ImportError:
         embedding_dim: int
         max_token_size: int
         func: Callable
+
+        def __call__(self, *args, **kwargs):
+            return self.func(*args, **kwargs)
 
 
 # ── Query Interface ──────────────────────────────────────────────────────
