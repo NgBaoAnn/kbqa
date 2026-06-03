@@ -51,6 +51,7 @@ The database uses the VietMedKG schema:
 - (d:Disease)-[:HAS_TREATMENT]->(t:Treatment)
 - (d:Disease)-[:IS_PRESCRIBED]->(m:Medicine)
 - (d:Disease)-[:HAS_ADVICE]->(a:Advice)
+- (d:Disease)-[:IS_LINKED_WITH]->(d2:Disease)
 
 # EXAMPLES (Learn from these):
 Question: "triệu chứng của viêm phổi"
@@ -61,6 +62,9 @@ Cypher: MATCH (d:Disease)-[:IS_PRESCRIBED]->(m:Medicine) WHERE toLower(d.disease
 
 Question: "cách điều trị viêm phổi"
 Cypher: MATCH (d:Disease)-[:HAS_TREATMENT]->(t:Treatment) WHERE toLower(d.disease_name) CONTAINS toLower('viêm phổi') RETURN t.cure_method
+
+Question: "bệnh đi kèm với viêm phổi"
+Cypher: MATCH (d:Disease)-[:IS_LINKED_WITH]->(d2:Disease) WHERE toLower(d.disease_name) CONTAINS toLower('viêm phổi') RETURN d2.disease_name
 
 # IMPORTANT RULES:
 1. ALWAYS use `WHERE toLower(d.disease_name) CONTAINS toLower(...)` for disease names.
