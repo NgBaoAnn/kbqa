@@ -10,17 +10,17 @@ Dual-path pipeline:
     └───┬─────────┬───┘
         │         │
    ┌────▼───┐ ┌──▼──────────────────────┐
-   │ CYPHER │ │  LIGHTRAG (naive)         │
-   │ Path   │ │  Vector search on Qdrant  │
-   │        │ │                           │
-   │ Text2  │ │  bge-m3 embed(question)   │
-   │ Cypher │ │    → top-k chunks         │
-   │   ↓    │ │    → LLM synthesis        │
-   │ Neo4j  │ │                           │
-   │ (KBQA  │ │  NOTE: LightRAG's own     │
-   │  graph)│ │  internal graph is NOT    │
-   │   ↓    │ │  used. VietMedKG graph is │
-   │ Format │ │  served by Cypher path.   │
+   │ CYPHER │ │  LIGHTRAG (local)          │
+   │ Path   │ │  Entity + Rel search       │
+   │        │ │                            │
+   │ Text2  │ │  bge-m3 embed(question)    │
+   │ Cypher │ │    → top-k entities        │
+   │   ↓    │ │    → related rels          │
+   │ Neo4j  │ │    → LLM synthesis         │
+   │ (KBQA  │ │                            │
+   │  graph)│ │  NOTE: local mode uses     │
+   │   ↓    │ │  entity+rel search on      │
+   │ Format │ │  Qdrant (3 collections).   │
    └───┬────┘ └──┬──────────────────────┘
        │         │
     ┌──▼─────────▼──┐
@@ -39,9 +39,10 @@ logger = logging.getLogger(__name__)
 # Naive Qdrant search + LLM synthesis can take up to ~90s on cold start.
 PIPELINE_TIMEOUT_SECONDS = 120
 
-# LightRAG semantic path always uses naive (vector-only) mode.
+# LightRAG semantic path uses local mode (entity + relationship vector search).
+# Requires lightrag_vdb_entities + lightrag_vdb_relationships to be populated in Qdrant.
 # The VietMedKG graph is served exclusively by the Cypher path.
-_LIGHTRAG_MODE = "naive"
+_LIGHTRAG_MODE = "local"
 
 # User-facing messages per language
 _USER_MESSAGES = {
@@ -344,13 +345,15 @@ async def _execute_lightrag_path(
     mode: str | None,
     start_time: float,
 ) -> dict[str, Any]:
-    """Execute the LightRAG semantic path — pure Qdrant vector search (naive).
+    """Execute the LightRAG semantic path — local mode (entity + relationship vector search).
 
-    Uses bge-m3 embeddings stored in Qdrant Cloud to find the top-k most
-    similar disease chunks, then synthesizes an answer with the local LLM.
+    Uses bge-m3 embeddings stored in Qdrant Cloud:
+    - lightrag_vdb_entities: semantic search trên entities
+    - lightrag_vdb_relationships: tìm relationships liên quan
+    - lightrag_vdb_chunks: context bổ sung
 
     The VietMedKG graph (Neo4j) is NOT touched here — it is served by
-    the Cypher path.  mode is always forced to «naive» by lightrag_service.
+    the Cypher path.  mode defaults to «local» for entity-aware retrieval.
     """
     from ai_engine.services import lightrag_service
     from ai_engine.utils.response_formatter import (
