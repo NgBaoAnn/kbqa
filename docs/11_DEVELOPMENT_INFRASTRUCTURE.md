@@ -49,7 +49,7 @@ aegishealth-kbqa/
 │   │   ├── cypher_validator.py     # [LEGACY] Cypher syntax checker
 │   │   └── sanitizer.py           # [LEGACY] Cypher sanitization
 │   ├── scripts/                    # CLI scripts
-│   │   ├── import_vietmedkg.py     # Nhập VietMedKG vào Neo4j (Data team)
+│   │   ├── [DELETED]               # Moved to etl/graph_builder/build_graph.py
 │   │   └── index_documents.py      # Indexing VietMedKG → LightRAG (AI team)
 │   ├── eval/                       # Evaluation & Benchmarking
 │   │   ├── golden_test_set.json    # 50 cặp (question, expected) benchmark
