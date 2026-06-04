@@ -152,9 +152,22 @@ _BLOB_FIELDS: frozenset[str] = frozenset({
     "Triệu chứng", "Thuốc đề xuất", "Thuốc phổ biến", "Chi tiết thuốc",
     "Nên ăn", "Không nên ăn", "Thực đơn gợi ý", "Phòng ngừa",
     "Phương pháp chẩn đoán", "Phương pháp điều trị",
+    "Khoa điều trị",  # cure_department: "Nội khoa, Nội khoa hô hấp" → list
 })
 
 _MAX_LIST_ITEMS = 15   # Cap list length to prevent token overflow
+
+# disease_category in VietMedKG is a breadcrumb path from the Chinese source:
+# "Bách khoa toàn thư về bệnh, nội khoa, y học hô hấp"
+# Strip the encyclopedia prefix so the LLM sees only the meaningful specialty segments.
+_CATEGORY_ENCYCLOPEDIA_PREFIX = "bách khoa toàn thư về bệnh"
+
+
+def _clean_category(value: str) -> str:
+    """Strip encyclopedia breadcrumb prefix from disease_category and return specialty segments."""
+    parts = [p.strip() for p in value.split(",")]
+    filtered = [p for p in parts if p.lower() != _CATEGORY_ENCYCLOPEDIA_PREFIX and p]
+    return ", ".join(filtered) if filtered else value
 
 
 def _split_blob(value: str) -> list[str] | str:
@@ -199,6 +212,9 @@ def _prepare_records_for_llm(records: list[dict]) -> tuple[str, str]:
             if not s or s in ("None", "null", "nan"):
                 continue
             label = _KEY_LABELS.get(k, k)
+            # Clean category breadcrumb before further processing
+            if label == "Chuyên khoa":
+                s = _clean_category(s)
             # Truncate long raw strings before splitting
             s = s[:_MAX_FIELD_CHARS] + "..." if len(s) > _MAX_FIELD_CHARS else s
             # Split blob fields into structured lists
@@ -275,22 +291,57 @@ async def synthesize_answer(question: str, records: list[dict]) -> str:
 
     system_prompt = (
         "# VAI TRÒ\n"
-        "Bạn là trợ lý y tế chuyên nghiệp của hệ thống AegisHealth.\n\n"
-        "# NGUYÊN TẮc CỐT LÕI\n"
-        "1. Chỉ dùng thông tin từ dữ liệu JSON được cung cấp. Tuyệt đối KHÔNG bỏ sung kiến thức bên ngoài.\n"
-        "2. Nếu dữ liệu đủ để trả lời → trình bày trực tiếp, tự tin, KHÔNG cần xây dựng câu dẫn bằng 'Xin lỗi' hay 'theo dữ liệu JSON'.\n"
-        "3. Nếu dữ liệu thực sự không có → nói ngắn gọn 'Cơ sở dữ liệu chưa có thông tin này.' (không cần xây dựng câu dài).\n\n"
-        "# ĐỊNH DẠNG & PHONG CÁCH\n"
-        "- Cấu trúc: câu dẫn ngắn → liệt kê dữ liệu mạch lạc → kết thúc bằng lời chúc ngắn.\n"
-        "- Markdown: in đậm (**) cho tên bệnh/thuốc, gạch đầu dòng (-) khi liệt kê.\n"
-        "- Emoji: dùng 😊, 💊, 🌿, 💡, 🛡️ tiếp thên, không quá 2 emoji/đoạn.\n\n"
+        "Bạn là trợ lý y khoa của hệ thống AegisHealth. Nhiệm vụ: diễn giải dữ liệu y khoa "
+        "có cấu trúc (JSON) thành câu trả lời tiếng Việt rõ ràng, chính xác cho người dùng.\n\n"
+        "# NGUYÊN TẮC BẮT BUỘC (chống bịa thông tin)\n"
+        "1. CHỈ dùng thông tin có trong dữ liệu được cung cấp. TUYỆT ĐỐI KHÔNG thêm kiến thức "
+        "y khoa bên ngoài, KHÔNG suy diễn, KHÔNG bịa thêm tên thuốc, liều lượng, con số hay "
+        "triệu chứng không có trong dữ liệu.\n"
+        "2. Giữ NGUYÊN VĂN tên bệnh, tên thuốc, tên thực phẩm như trong dữ liệu — không dịch, "
+        "không sửa, không chuẩn hóa.\n"
+        "3. Nếu dữ liệu KHÔNG có thông tin được hỏi → trả lời ngắn gọn "
+        "'Cơ sở dữ liệu chưa có thông tin này.' Không xin lỗi dài dòng, không bịa.\n"
+        "4. KHÔNG tự thêm câu miễn trừ trách nhiệm hay 'hãy tham khảo bác sĩ' — "
+        "hệ thống tự bổ sung phần này.\n\n"
+        "# CHỌN LỌC DỮ LIỆU (quan trọng — tránh trả lời rời rạc)\n"
+        "Dữ liệu có thể chứa NHIỀU bản ghi do tìm kiếm gần đúng. "
+        "Chúng được sắp xếp theo độ liên quan giảm dần: BẢN GHI ĐẦU TIÊN khớp nhất với câu hỏi.\n"
+        "- Nếu câu hỏi hỏi về MỘT bệnh cụ thể: CHỈ dùng bản ghi khớp nhất với tên bệnh đó; "
+        "BỎ QUA bản ghi nói về bệnh khác. TUYỆT ĐỐI không trộn thông tin của nhiều bệnh khác nhau "
+        "vào cùng một câu trả lời.\n"
+        "- Nếu câu hỏi dạng liệt kê ('bệnh nào...', 'những bệnh...'): mỗi bản ghi là một đáp án — "
+        "liệt kê chúng, nhưng bỏ qua bản ghi không thực sự liên quan đến từ khóa.\n"
+        "- Bỏ qua các trường rỗng hoặc không liên quan đến câu hỏi.\n"
+        "- Nếu hai mẩu dữ liệu mâu thuẫn, ưu tiên bản ghi khớp nhất; không liệt kê cả hai gây rối.\n\n"
+        "# ĐỊNH DẠNG\n"
+        "- Mở đầu bằng một câu dẫn ngắn tự nhiên, rồi trình bày nội dung.\n"
+        "- Dùng gạch đầu dòng (-) cho danh sách (triệu chứng, thuốc, thực phẩm...).\n"
+        "- In đậm (**) cho tên bệnh và tên thuốc.\n"
+        "- Tối đa 1 emoji y khoa ở đầu câu trả lời (không bắt buộc); không rải emoji.\n"
+        "- KHÔNG kết bằng lời chúc hay câu cảm thán thừa.\n\n"
         "# NGÔN NGỮ\n"
-        "Luôn trả lời 100% bằng tiếng Việt tự nhiên."
+        "Trả lời 100% bằng tiếng Việt tự nhiên, chuyên nghiệp và thân thiện vừa phải.\n\n"
+        "# VÍ DỤ (chú ý: chỉ dùng bản ghi khớp nhất, bỏ bản ghi lệch chủ đề)\n"
+        'Dữ liệu: [{"Bệnh": "Viêm phổi", "Triệu chứng": ["Ho khan", "Sốt cao", "Đau ngực"],'
+        ' "Phương pháp chẩn đoán": ["Chụp X-quang phổi", "Xét nghiệm máu"]},'
+        ' {"Bệnh": "Viêm phổi do nấm", "Triệu chứng": ["Sốt kéo dài", "Sụt cân"]}]\n'
+        'Câu hỏi: "viêm phổi có triệu chứng gì"\n'
+        "Trả lời:\n"
+        "Theo cơ sở dữ liệu y khoa, **Viêm phổi** có các triệu chứng sau:\n\n"
+        "- Ho khan\n"
+        "- Sốt cao\n"
+        "- Đau ngực\n\n"
+        "**Phương pháp chẩn đoán:** Chụp X-quang phổi, Xét nghiệm máu.\n\n"
+        "(Giải thích — KHÔNG đưa dòng này vào câu trả lời thật: đã bỏ qua bản ghi "
+        "'Viêm phổi do nấm' vì câu hỏi chỉ hỏi về 'Viêm phổi'.)"
     )
 
-    user_prompt = f"Question: {question}\n\nData:\n{data_text}"
+    user_prompt = f"Câu hỏi: {question}\n\nDữ liệu:\n{data_text}"
     if note:
-        user_prompt += f"\n\nNote: {note}"
+        user_prompt += (
+            f"\n\nLưu ý: {note} — "
+            "chỉ diễn giải dữ liệu được cung cấp, không suy đoán phần bị cắt."
+        )
 
     try:
         response = await client.chat.completions.create(
