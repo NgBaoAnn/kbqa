@@ -87,7 +87,8 @@ def classify_response_type(question: str, answer: str) -> str:
         if len(list_items) >= 2:
             return "table"
 
-    # 4. Check for list-like content in answer → table
+    # 4. Unconditionally check for list-like content in answer → table
+    # (Block 3 only triggers when detect_list_intent matches; this catches all other cases.)
     list_items = re.findall(r"^[\s]*[-•\d.]+\s+\S", answer, re.MULTILINE)
     if len(list_items) >= 2:
         return "table"
