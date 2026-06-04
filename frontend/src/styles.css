@@ -522,3 +522,46 @@ tr:last-child td {
     width: auto;
   }
 }
+
+/* Markdown Prose Styles */
+.markdown-prose {
+  line-height: 1.6;
+  font-size: 0.95rem;
+}
+
+.markdown-prose p {
+  margin-bottom: 0.75rem;
+}
+
+.markdown-prose p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-prose ul, .markdown-prose ol {
+  margin-left: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-prose li {
+  margin-bottom: 0.25rem;
+}
+
+.markdown-prose strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.markdown-prose blockquote {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 4px solid var(--accent);
+  background-color: var(--surface);
+  border-radius: 0 4px 4px 0;
+  color: var(--text-secondary);
+}
+
+.warning-response .markdown-prose blockquote {
+  border-left-color: var(--danger);
+  background-color: rgba(220, 38, 38, 0.05);
+  color: var(--danger);
+}

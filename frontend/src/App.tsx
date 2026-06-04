@@ -2,7 +2,6 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   Activity,
   Bot,
-  ChevronDown,
   CircleAlert,
   GraduationCap,
   HeartPulse,
@@ -14,7 +13,7 @@ import {
 } from "lucide-react";
 import { ResponseRenderer } from "./components/ResponseRenderer";
 import { getHealth, queryMedical } from "./services/api";
-import type { ApiError, HealthResponse, Language, QueryMode, QueryResponse } from "./types/api";
+import type { ApiError, HealthResponse, QueryResponse } from "./types/api";
 
 type ChatMessage =
   | {
@@ -59,8 +58,6 @@ const chips = [
   },
 ];
 
-const modes: QueryMode[] = ["naive", "local", "global", "hybrid", "mix"];
-
 function nowLabel() {
   return new Intl.DateTimeFormat("vi-VN", {
     hour: "2-digit",
@@ -78,8 +75,6 @@ function healthLabel(health: HealthResponse | null, error: string | null) {
 function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [question, setQuestion] = useState("");
-  const [language, setLanguage] = useState<Language>("vi");
-  const [mode, setMode] = useState<QueryMode>("hybrid");
   const [isSending, setIsSending] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -137,8 +132,6 @@ function App() {
     try {
       const response = await queryMedical({
         question: trimmed,
-        language,
-        mode,
       });
 
       setMessages((current) => [
@@ -263,33 +256,13 @@ function App() {
                 event.currentTarget.form?.requestSubmit();
               }
             }}
-            placeholder="How can I help you today?"
+            placeholder="Bạn cần hỗ trợ gì về sức khỏe hôm nay?"
             rows={1}
             maxLength={1000}
           />
 
           <div className="composer-bar">
             <div className="composer-controls">
-              <label className="select-pill">
-                <span>{mode}</span>
-                <select value={mode} onChange={(event) => setMode(event.target.value as QueryMode)}>
-                  {modes.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={13} />
-              </label>
-
-              <button
-                className="text-toggle"
-                type="button"
-                onClick={() => setLanguage(language === "vi" ? "en" : "vi")}
-              >
-                {language.toUpperCase()}
-              </button>
-
               <button className="send-button" type="submit" disabled={!canSubmit} aria-label="Gửi câu hỏi">
                 {isSending ? <Loader2 size={20} className="spin" /> : <Send size={20} />}
               </button>

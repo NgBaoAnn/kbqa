@@ -1,11 +1,7 @@
-export type QueryMode = "naive" | "local" | "global" | "hybrid" | "mix";
-export type Language = "vi" | "en";
 export type ResponseType = "text" | "table" | "warning";
 
 export interface QueryRequest {
   question: string;
-  language: Language;
-  mode?: QueryMode;
 }
 
 export interface QueryMetadata {
