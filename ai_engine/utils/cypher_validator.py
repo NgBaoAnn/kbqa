@@ -15,7 +15,7 @@ ALLOWED_RELATIONSHIP_TYPES = {
 DESTRUCTIVE_KEYWORDS = [
     r"\bDELETE\b", r"\bDROP\b", r"\bCREATE\b", r"\bSET\b",
     r"\bREMOVE\b", r"\bMERGE\b", r"\bDETACH\b", r"\bCALL\b",
-    r"\bLOAD\s+CSV\b",
+    r"\bLOAD\s+CSV\b", r"\bFOREACH\b",
 ]
 
 
