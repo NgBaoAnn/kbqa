@@ -13,6 +13,13 @@ import os
 from pathlib import Path
 from typing import Any
 
+# ── httpx 0.28.x workaround ──────────────────────────────────────────────
+# macOS/Linux may set NO_PROXY="::1,..." which httpx 0.28 parses as
+# "Invalid port: ':1'", breaking all Qdrant Cloud connections.
+# Must be cleared before httpx is imported by the Qdrant client.
+os.environ["NO_PROXY"] = ""
+os.environ["no_proxy"] = ""
+
 from ai_engine.config import (
     DEFAULT_QUERY_MODE,
     EMBEDDING_DIM,
@@ -61,6 +68,51 @@ async def get_lightrag_instance():
         return _lightrag_instance
 
 
+def _clear_stale_llm_cache(working_dir: Path) -> None:
+    """Delete the LLM keyword cache if it exists.
+
+    The cache may contain keyword extractions in the wrong language (English)
+    from runs before addon_params={\"language\": \"Vietnamese\"} was set.
+    Clearing it forces LightRAG to re-extract keywords using the correct language.
+    The cache is regenerated automatically on the next query.
+    """
+    cache_file = working_dir / "kv_store_llm_response_cache.json"
+    if cache_file.exists():
+        try:
+            import json
+
+            with open(cache_file, encoding="utf-8") as f:
+                data = json.load(f)
+
+            # Check if any cached keyword entry has English-only keywords
+            stale = False
+            for key, val in data.items():
+                if "keywords" in key and isinstance(val, dict):
+                    content = val.get("return", "")
+                    try:
+                        kw = json.loads(content) if isinstance(content, str) else content
+                        ll = kw.get("low_level_keywords", [])
+                        hl = kw.get("high_level_keywords", [])
+                        # If ll_keywords is empty while hl has values, it's likely stale
+                        if hl and not ll:
+                            stale = True
+                            break
+                    except Exception:
+                        pass
+
+            if stale:
+                cache_file.unlink()
+                logger.info(
+                    "Cleared stale LLM keyword cache (contained English-only keywords "
+                    "that would not match Vietnamese entities in Qdrant): %s",
+                    cache_file,
+                )
+            else:
+                logger.debug("LLM cache appears valid, keeping: %s", cache_file)
+        except Exception as e:
+            logger.warning("Could not inspect LLM cache, skipping cleanup: %s", e)
+
+
 async def _create_lightrag_instance():
     """Create and configure a new LightRAG instance.
 
@@ -89,6 +141,10 @@ async def _create_lightrag_instance():
     logger.info("  LLM Model: %s", LLM_MODEL_NAME)
     logger.info("  Embedding Model: %s", EMBEDDING_MODEL)
     logger.info("  Query Mode (enforced): %s", EFFECTIVE_QUERY_MODE)
+
+    # Clear stale LLM cache that may contain English keywords from previous runs
+    # (LightRAG default language=English; we now use Vietnamese which would mismatch)
+    _clear_stale_llm_cache(working_dir)
 
     # Import the LLM/embedding wrapper functions from our service
     from ai_engine.services.llm_service import embedding_func, llm_model_func
@@ -121,6 +177,10 @@ async def _create_lightrag_instance():
         graph_storage=LIGHTRAG_KG_STORAGE,
         vector_storage=LIGHTRAG_VECTOR_STORAGE,
         kv_storage=LIGHTRAG_DOC_STORAGE,
+        # Set language to Vietnamese so LightRAG keyword extraction produces
+        # Vietnamese terms that match our Qdrant entities (stored in Vietnamese).
+        # Without this, LightRAG defaults to English → 0 search results.
+        addon_params={"language": "Vietnamese"},
     )
 
     logger.info("Initializing LightRAG storages...")
