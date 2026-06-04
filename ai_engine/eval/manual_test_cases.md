@@ -28,7 +28,7 @@
 |---|---------|----------------|---------|
 | T9 | `những bệnh nào có triệu chứng sốt cao?` | `cypher:template:find_by_symptom` | keyword="sốt cao" |
 | T10 | `bệnh nào dùng thuốc Paracetamol?` | `cypher:template:find_by_medicine` | keyword="Paracetamol" |
-| T11 | `những bệnh nào thường gặp ở người cao tuổi?` | `cypher:template:find_by_prevention` | keyword="người cao tuổi" |
+| T11 | `những bệnh nào thường gặp ở người cao tuổi?` | `lightrag` (semantic) | Câu hỏi về nhóm dân số → LightRAG |
 | T12 | `bệnh nào nên ăn rau xanh?` | `cypher:template:find_by_nutrition_eat` | keyword="rau xanh" |
 | T13 | `bệnh nào cần kiêng đường?` | `cypher:template:find_by_nutrition_avoid` | keyword="đường" |
 
