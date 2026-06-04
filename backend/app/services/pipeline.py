@@ -123,18 +123,18 @@ async def _run_pipeline_inner(
             logger.info("Pipeline: mode='%s' explicitly set → LightRAG", mode)
             return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
 
-        # ── Step 3: Regex fast path intent extraction ─────────────────────
-        query_type, entity = classify_cypher_intent(question)
-        routing_method = "regex"
+        # ── Step 3: LLM Intent Extraction (Accuracy First) ──────────────────
+        query_type, entity = await extract_intent_with_llm(question)
+        routing_method = "llm"
 
-        # ── Step 4: LLM fallback when regex cannot extract a valid entity ──
+        # ── Step 4: Regex fallback when LLM fails or misses entity ──────────
         if entity is None and query_type != "count":
-            q_type_llm, entity_llm = await extract_intent_with_llm(question)
-            if q_type_llm:
-                query_type = q_type_llm
-            if entity_llm:
-                entity = entity_llm
-            routing_method = "llm"   # LLM was invoked — log honestly
+            q_type_regex, entity_regex = classify_cypher_intent(question)
+            if q_type_regex:
+                query_type = q_type_regex
+            if entity_regex:
+                entity = entity_regex
+            routing_method = "regex_fallback"
 
         logger.info(
             "Pipeline: intent type=%s entity=%r method=%s",
@@ -285,7 +285,6 @@ async def _execute_cypher_path(
     Flow: Layer 1 (template) → Neo4j → Layer 3 (format)
     """
     from ai_engine.services.cypher_query_builder import build_cypher_query
-    from ai_engine.utils.cypher_result_formatter import format_cypher_result_as_text
     from ai_engine.services.text2cypher import generate_cypher, synthesize_answer
     from ai_engine.utils.cypher_validator import validate_cypher
     from ai_engine.utils.response_formatter import format_error_response, format_lightrag_response
@@ -338,16 +337,12 @@ async def _execute_cypher_path(
         logger.info("Cypher 0 records → LightRAG fallback")
         return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
 
-    # ── Layer 3: Format response ────────────────────────────────────────────
-    if use_template:
-        # Deterministic formatter — 0 LLM calls
-        answer_text = format_cypher_result_as_text(query_type, disease_name, records)
-    else:
-        # LLM synthesis for fallback queries (payload budget enforced inside synthesize_answer)
-        try:
-            answer_text = await synthesize_answer(question, records)
-        except Exception:
-            answer_text = str(records[:3])
+    # ── Layer 3: Format response (via LLM) ─────────────────────────────────
+    try:
+        answer_text = await synthesize_answer(question, records)
+    except Exception as e:
+        logger.error("Synthesize answer failed: %s", e)
+        answer_text = str(records[:3])
 
     # (Disclaimer appending moved to format_lightrag_response)
 
