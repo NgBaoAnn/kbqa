@@ -1,9 +1,9 @@
 """UI Constants — Centralized UI text and greetings for cypher result formatters."""
 
 MEDICAL_DISCLAIMER = (
-    "\n\n> [!WARNING]\n"
-    "> **Lưu ý y khoa:** Các thông tin trên chỉ mang tính chất tham khảo dựa trên Knowledge Graph. "
-    "Vui lòng thăm khám trực tiếp với bác sĩ chuyên khoa để có chẩn đoán và phác đồ điều trị chính xác nhất."
+    "\n\n> [!NOTE]\n"
+    "> **Lưu ý:** Thông tin mang tính chất tham khảo. "
+    "Vui lòng tham khảo ý kiến bác sĩ chuyên khoa để có chẩn đoán chính xác."
 )
 
 GREETINGS_SYMPTOMS = [
