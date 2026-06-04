@@ -437,6 +437,15 @@ A: {"query_type": "find_by_symptom", "entity": "ho khan"}
 Q: "thuốc chữa viêm phổi"
 A: {"query_type": "medicine", "entity": "viêm phổi"}
 
+Q: "bệnh tiểu đường điều trị bằng thuốc gì"
+A: {"query_type": "medicine", "entity": "tiểu đường"}
+
+Q: "viêm phổi dùng thuốc gì"
+A: {"query_type": "medicine", "entity": "viêm phổi"}
+
+Q: "cao huyết áp uống thuốc gì"
+A: {"query_type": "medicine", "entity": "cao huyết áp"}
+
 Q: "thuốc Azithromycin chữa bệnh nào"
 A: {"query_type": "find_by_medicine", "entity": "Azithromycin"}
 
@@ -472,6 +481,15 @@ A: {"query_type": "find_by_nutrition_eat", "entity": "hạt sen"}
 
 Q: "phòng tránh viêm phổi như thế nào"
 A: {"query_type": "prevention", "entity": "viêm phổi"}
+
+Q: "phòng tránh bệnh viêm gan B như thế nào"
+A: {"query_type": "prevention", "entity": "viêm gan B"}
+
+Q: "cách phòng ngừa bệnh tiểu đường"
+A: {"query_type": "prevention", "entity": "tiểu đường"}
+
+Q: "làm thế nào để phòng bệnh cao huyết áp"
+A: {"query_type": "prevention", "entity": "cao huyết áp"}
 
 Q: "rửa tay phòng được bệnh nào"
 A: {"query_type": "find_by_prevention", "entity": "rửa tay"}
