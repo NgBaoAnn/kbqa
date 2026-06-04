@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 
 from openai import AsyncOpenAI
 
@@ -277,6 +278,51 @@ async def generate_cypher(question: str) -> str:
         raise ValueError(f"LLM generation failed: {e}") from e
 
 
+# Patterns that 7B models sometimes append as trailing commentary.
+# These are checked against the LAST non-empty line of the answer.
+# Two groups: (A) start-of-line patterns, (B) anywhere-in-line leak patterns.
+_TRAILING_JUNK_START = re.compile(
+    r"^(?:\*\*[^*]+\*\*\s*)?("  # optional leading **bold**
+    r"Cơ sở dữ liệu chưa có|"
+    r"Hiện tại.{0,10}chưa có|"
+    r"Lưu ý[:\s]|"
+    r"Chú ý[:\s]|"
+    r"Chúc bạn|"
+    r"Hãy tham khảo|"
+    r"Nên tham khảo|"
+    r"Bạn nên đến|"
+    r"Tuy nhiên.{0,30}(cần|nên|hãy)|"
+    r"Ngoài ra.{0,30}không có|"
+    r"\(Giải thích"
+    r")",
+    re.IGNORECASE,
+)
+# Leak patterns — anywhere in line (expose internal record limits, data selection)
+_TRAILING_JUNK_CONTAINS = re.compile(
+    r"(không được liệt kê|kết quả đầu|bản ghi đầu|không nằm trong)",
+    re.IGNORECASE,
+)
+
+
+def _strip_trailing_commentary(answer: str) -> str:
+    """Remove trailing disclaimer/commentary lines that 7B models add.
+
+    Scans from the bottom up and removes lines matching known junk patterns.
+    Stops at the first line that looks like real content.
+    """
+    lines = answer.rstrip().split("\n")
+    while lines:
+        last = lines[-1].strip()
+        if not last:
+            lines.pop()
+            continue
+        if _TRAILING_JUNK_START.search(last) or _TRAILING_JUNK_CONTAINS.search(last):
+            lines.pop()
+            continue
+        break
+    return "\n".join(lines).rstrip()
+
+
 async def synthesize_answer(question: str, records: list[dict]) -> str:
     """Synthesize a natural language answer from Cypher result records.
 
@@ -293,47 +339,53 @@ async def synthesize_answer(question: str, records: list[dict]) -> str:
         "# VAI TRÒ\n"
         "Bạn là trợ lý y khoa của hệ thống AegisHealth. Nhiệm vụ: diễn giải dữ liệu y khoa "
         "có cấu trúc (JSON) thành câu trả lời tiếng Việt rõ ràng, chính xác cho người dùng.\n\n"
-        "# NGUYÊN TẮC BẮT BUỘC (chống bịa thông tin)\n"
-        "1. CHỈ dùng thông tin có trong dữ liệu được cung cấp. TUYỆT ĐỐI KHÔNG thêm kiến thức "
-        "y khoa bên ngoài, KHÔNG suy diễn, KHÔNG bịa thêm tên thuốc, liều lượng, con số hay "
-        "triệu chứng không có trong dữ liệu.\n"
-        "2. Giữ NGUYÊN VĂN tên bệnh, tên thuốc, tên thực phẩm như trong dữ liệu — không dịch, "
-        "không sửa, không chuẩn hóa.\n"
-        "3. Nếu dữ liệu KHÔNG có thông tin được hỏi → trả lời ngắn gọn "
-        "'Cơ sở dữ liệu chưa có thông tin này.' Không xin lỗi dài dòng, không bịa.\n"
-        "4. KHÔNG tự thêm câu miễn trừ trách nhiệm hay 'hãy tham khảo bác sĩ' — "
-        "hệ thống tự bổ sung phần này.\n\n"
-        "# CHỌN LỌC DỮ LIỆU (quan trọng — tránh trả lời rời rạc)\n"
-        "Dữ liệu có thể chứa NHIỀU bản ghi do tìm kiếm gần đúng. "
-        "Chúng được sắp xếp theo độ liên quan giảm dần: BẢN GHI ĐẦU TIÊN khớp nhất với câu hỏi.\n"
-        "- Nếu câu hỏi hỏi về MỘT bệnh cụ thể: CHỈ dùng bản ghi khớp nhất với tên bệnh đó; "
-        "BỎ QUA bản ghi nói về bệnh khác. TUYỆT ĐỐI không trộn thông tin của nhiều bệnh khác nhau "
-        "vào cùng một câu trả lời.\n"
-        "- Nếu câu hỏi dạng liệt kê ('bệnh nào...', 'những bệnh...'): mỗi bản ghi là một đáp án — "
-        "liệt kê chúng, nhưng bỏ qua bản ghi không thực sự liên quan đến từ khóa.\n"
-        "- Bỏ qua các trường rỗng hoặc không liên quan đến câu hỏi.\n"
-        "- Nếu hai mẩu dữ liệu mâu thuẫn, ưu tiên bản ghi khớp nhất; không liệt kê cả hai gây rối.\n\n"
+        "# NGUYÊN TẮC BẮT BUỘC\n"
+        "1. CHỈ dùng thông tin có trong dữ liệu. KHÔNG thêm kiến thức y khoa bên ngoài, "
+        "KHÔNG suy diễn, KHÔNG bịa thêm tên thuốc, liều lượng hay triệu chứng.\n"
+        "2. KHÔNG tự thêm câu miễn trừ trách nhiệm — hệ thống tự bổ sung.\n"
+        "3. Nếu dữ liệu trống ([]) → trả lời: 'Cơ sở dữ liệu chưa có thông tin này.' "
+        "Nếu dữ liệu CÓ kết quả → KHÔNG thêm câu 'chưa có thông tin' ở cuối.\n"
+        "4. KHÔNG giải thích lý do bỏ qua bản ghi, KHÔNG bình luận về dữ liệu — "
+        "chỉ trình bày kết quả cuối cùng rồi dừng.\n\n"
+        "# XỬ LÝ DỮ LIỆU DỊCH MÁY (rất quan trọng)\n"
+        "Dữ liệu gốc được dịch máy từ tiếng Trung Quốc → tiếng Việt, nên thường có lỗi:\n"
+        "- Phiên âm Trung Quốc vô nghĩa: 'Úc Trác', 'Yan Peng Hui', 'Renqingmangjine'\n"
+        "- Dịch sai ngữ cảnh: 'tiền gửi của phế nang' (thực tế = lắng đọng trong phế nang)\n"
+        "- Câu cú lủng củng, lặp lại, thừa chữ\n\n"
+        "Cách xử lý:\n"
+        "- ÂM THẦM BỎ QUA các từ/cụm từ vô nghĩa (phiên âm Trung) — không nhắc đến trong câu trả lời.\n"
+        "- Giữ nguyên tên thuốc Latin/Anh (Erythromycin, Metformin...) vì đó là tên quốc tế hợp lệ.\n"
+        "- Diễn đạt lại các câu bị dịch vụng cho tự nhiên, nhưng KHÔNG thay đổi ý nghĩa y khoa.\n"
+        "- Nếu một mục HOÀN TOÀN là rác dịch máy → bỏ qua mục đó.\n\n"
+        "# CHỌN LỌC DỮ LIỆU\n"
+        "Dữ liệu được sắp xếp theo độ liên quan giảm dần (bản ghi đầu = khớp nhất).\n"
+        "- Hỏi về MỘT bệnh → chỉ dùng bản ghi khớp nhất, bỏ qua bệnh khác.\n"
+        "- Hỏi dạng liệt kê ('bệnh nào...') → mỗi bản ghi là một đáp án.\n"
+        "- Bỏ qua trường rỗng hoặc không liên quan đến câu hỏi.\n\n"
         "# ĐỊNH DẠNG\n"
-        "- Mở đầu bằng một câu dẫn ngắn tự nhiên, rồi trình bày nội dung.\n"
-        "- Dùng gạch đầu dòng (-) cho danh sách (triệu chứng, thuốc, thực phẩm...).\n"
-        "- In đậm (**) cho tên bệnh và tên thuốc.\n"
-        "- Tối đa 1 emoji y khoa ở đầu câu trả lời (không bắt buộc); không rải emoji.\n"
-        "- KHÔNG kết bằng lời chúc hay câu cảm thán thừa.\n\n"
-        "# NGÔN NGỮ\n"
-        "Trả lời 100% bằng tiếng Việt tự nhiên, chuyên nghiệp và thân thiện vừa phải.\n\n"
-        "# VÍ DỤ (chú ý: chỉ dùng bản ghi khớp nhất, bỏ bản ghi lệch chủ đề)\n"
-        'Dữ liệu: [{"Bệnh": "Viêm phổi", "Triệu chứng": ["Ho khan", "Sốt cao", "Đau ngực"],'
-        ' "Phương pháp chẩn đoán": ["Chụp X-quang phổi", "Xét nghiệm máu"]},'
-        ' {"Bệnh": "Viêm phổi do nấm", "Triệu chứng": ["Sốt kéo dài", "Sụt cân"]}]\n'
-        'Câu hỏi: "viêm phổi có triệu chứng gì"\n'
+        "- Câu dẫn ngắn → nội dung chính → kết thúc gọn.\n"
+        "- Dùng gạch đầu dòng (-) cho danh sách, in đậm (**) cho tên bệnh/tên thuốc.\n"
+        "- Độ dài: 3-15 dòng. Kết thúc ngay sau mục cuối, KHÔNG thêm câu tổng kết hay bình luận.\n"
+        "- Trả lời 100% bằng tiếng Việt tự nhiên.\n\n"
+        "# VÍ DỤ 1 — Hỏi 1 bệnh (lọc bản ghi + lọc rác dịch máy)\n"
+        'Dữ liệu: [{"Bệnh": "Ho gà", "Triệu chứng": ["ho co thắt", "sốt nhẹ", "tức ngực", "Yan Peng Hui"],'
+        ' "Thuốc đề xuất": ["Erythromycin Succinate Tablet", "100 gram xi-rô ròng"]},'
+        ' {"Bệnh": "Ho khan mạn tính", "Triệu chứng": ["ho kéo dài"]}]\n'
+        'Câu hỏi: "ho gà có triệu chứng gì"\n'
         "Trả lời:\n"
-        "Theo cơ sở dữ liệu y khoa, **Viêm phổi** có các triệu chứng sau:\n\n"
-        "- Ho khan\n"
-        "- Sốt cao\n"
-        "- Đau ngực\n\n"
-        "**Phương pháp chẩn đoán:** Chụp X-quang phổi, Xét nghiệm máu.\n\n"
-        "(Giải thích — KHÔNG đưa dòng này vào câu trả lời thật: đã bỏ qua bản ghi "
-        "'Viêm phổi do nấm' vì câu hỏi chỉ hỏi về 'Viêm phổi'.)"
+        "Theo dữ liệu y khoa, **Ho gà** có các triệu chứng:\n\n"
+        "- Ho co thắt\n"
+        "- Sốt nhẹ\n"
+        "- Tức ngực\n\n"
+        "**Thuốc thường dùng:** Erythromycin Succinate Tablet.\n\n"
+        "# VÍ DỤ 2 — Hỏi dạng liệt kê (reverse query)\n"
+        'Dữ liệu: [{"Bệnh": "Viêm phổi", "Triệu chứng": ["ho khan", "sốt cao"]},'
+        ' {"Bệnh": "Lao phổi", "Triệu chứng": ["ho khan kéo dài", "sụt cân"]}]\n'
+        'Câu hỏi: "bệnh nào gây ho khan"\n'
+        "Trả lời:\n"
+        "Các bệnh có triệu chứng ho khan trong cơ sở dữ liệu:\n\n"
+        "- **Viêm phổi**: ho khan, sốt cao\n"
+        "- **Lao phổi**: ho khan kéo dài, sụt cân\n"
     )
 
     user_prompt = f"Câu hỏi: {question}\n\nDữ liệu:\n{data_text}"
@@ -353,7 +405,10 @@ async def synthesize_answer(question: str, records: list[dict]) -> str:
             temperature=0.1,
             max_tokens=800,
         )
-        return response.choices[0].message.content.strip()
+        answer = response.choices[0].message.content.strip()
+        # Strip trailing commentary that 7B models sometimes add
+        answer = _strip_trailing_commentary(answer)
+        return answer
 
     except Exception as e:
         logger.error("Failed to synthesize answer: %s", e)
