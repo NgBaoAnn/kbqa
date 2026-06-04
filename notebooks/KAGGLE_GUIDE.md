@@ -145,3 +145,68 @@ curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
   -d '{"question": "tôi hay bị đau đầu và sốt thì có thể bị bệnh gì"}'
 ```
+
+---
+
+# 🏁 Hướng dẫn chạy Benchmark trên Kaggle
+
+## Mục đích
+
+Notebook [`kaggle_benchmark.ipynb`](./kaggle_benchmark.ipynb) chạy toàn bộ **45 câu benchmark mù** với model lớn hơn (qwen2.5:7b / 14b) để so sánh với kết quả local (qwen2.5:3b).
+
+## Kiến trúc trên Kaggle
+
+```
+Kaggle Notebook (GPU T4 x1)
+  ├── Ollama server    ← pull & serve qwen2.5:7b hoặc 14b
+  ├── FastAPI backend  ← kết nối Neo4j AuraDB (cloud)
+  └── Benchmark script ← gọi API, chấm điểm 45 câu
+```
+
+## Bước 1 — Chuẩn bị Kaggle Secrets
+
+Vào notebook → **Add-ons** → **Secrets**, thêm các secret sau và bật toggle **Allow notebook to access**:
+
+| Name | Value |
+|------|-------|
+| `NEO4J_URI` | `neo4j+s://xxxxxxxx.databases.neo4j.io` |
+| `NEO4J_USERNAME` | `neo4j` |
+| `NEO4J_PASSWORD` | *(từ .env local)* |
+| `QDRANT_URL` | `https://dacb4228-...cloud.qdrant.io` |
+| `QDRANT_API_KEY` | *(từ .env local)* |
+
+## Bước 2 — Upload và cài đặt
+
+1. Vào [kaggle.com/code](https://www.kaggle.com/code) → **New Notebook**
+2. **File** → **Import Notebook** → upload `notebooks/kaggle_benchmark.ipynb`
+3. **Settings** → **Accelerator** → **GPU T4 x1**
+4. **Settings** → **Internet** → **On**
+
+## Bước 3 — Chọn model và chạy
+
+Trong Cell 2, đổi `MODEL_NAME`:
+
+```python
+MODEL_NAME = "qwen2.5:7b"   # hoặc "qwen2.5:14b"
+```
+
+Nhấn **Run All**. Tiến trình ước tính:
+
+| Cell | Mô tả | Thời gian |
+|------|-------|-----------|
+| Cell 1-4 | Kiểm tra môi trường, clone repo, cài packages | ~3 phút |
+| Cell 5-6 | Cài Ollama + pull LLM model | ~5-15 phút |
+| Cell 7-9 | Cài embedding model + khởi động backend | ~3 phút |
+| Cell 10 | Smoke test 1 câu | ~30s |
+| **Cell 11** | **Benchmark 45 câu** | **~15-40 phút** |
+| Cell 12-13 | Hiển thị + so sánh kết quả | ~5s |
+
+## Bước 4 — Tải kết quả
+
+File `benchmark_qwen2.5_7b_YYYYMMDD.md` sẽ xuất hiện ở **Output panel** bên phải → tải về để so sánh với kết quả local.
+
+## Lưu ý
+
+- **Repo phải public** để notebook clone được. Nếu private, thêm `GITHUB_TOKEN` vào Secrets.
+- **Qdrant**: Nếu không có cloud data, LightRAG path không hoạt động, nhưng cypher path (phần lớn câu hỏi) vẫn chạy tốt qua Neo4j AuraDB.
+- **Giới hạn 12 giờ/session** của Kaggle — benchmark 45 câu thường xong trong 40 phút, rất an toàn.
