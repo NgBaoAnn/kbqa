@@ -50,17 +50,6 @@ LIST_INTENT_PATTERNS = [
     r"how many",
 ]
 
-EXPLAIN_INTENT_PATTERNS = [
-    r"là gì",
-    r"giải thích",
-    r"mô tả",
-    r"what is",
-    r"describe",
-    r"explain",
-    r"tại sao",
-    r"why",
-]
-
 
 def detect_emergency_intent(question: str) -> bool:
     """Detect if a question describes an emergency medical situation.
@@ -97,47 +86,3 @@ def detect_list_intent(question: str) -> bool:
             return True
 
     return False
-
-
-def detect_explain_intent(question: str) -> bool:
-    """Detect if a question expects an explanatory text response.
-
-    Args:
-        question: The user's question.
-
-    Returns:
-        True if the question likely expects an explanation.
-    """
-    question_lower = question.lower()
-
-    for pattern in EXPLAIN_INTENT_PATTERNS:
-        if re.search(pattern, question_lower):
-            return True
-
-    return False
-
-
-def classify_question_intent(question: str) -> str:
-    """Pre-classify the expected response type based on the question alone.
-
-    This provides a hint for post-processing. The final response_type
-    is determined by response_formatter.classify_response_type() which
-    also considers the actual answer content.
-
-    Args:
-        question: The user's question.
-
-    Returns:
-        One of: 'warning', 'table', 'text'.
-    """
-    if detect_emergency_intent(question):
-        return "warning"
-
-    if detect_list_intent(question):
-        return "table"
-
-    if detect_explain_intent(question):
-        return "text"
-
-    # Default
-    return "text"
