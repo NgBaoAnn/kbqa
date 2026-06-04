@@ -2,7 +2,6 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   Activity,
   Bot,
-  ChevronDown,
   CircleAlert,
   GraduationCap,
   HeartPulse,
@@ -14,7 +13,7 @@ import {
 } from "lucide-react";
 import { ResponseRenderer } from "./components/ResponseRenderer";
 import { getHealth, queryMedical } from "./services/api";
-import type { ApiError, HealthResponse, Language, QueryMode, QueryResponse } from "./types/api";
+import type { ApiError, HealthResponse, Language, QueryResponse } from "./types/api";
 
 type ChatMessage =
   | {
@@ -59,8 +58,6 @@ const chips = [
   },
 ];
 
-const modes: QueryMode[] = ["naive", "local", "global", "hybrid", "mix"];
-
 function nowLabel() {
   return new Intl.DateTimeFormat("vi-VN", {
     hour: "2-digit",
@@ -79,7 +76,6 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [question, setQuestion] = useState("");
   const [language, setLanguage] = useState<Language>("vi");
-  const [mode, setMode] = useState<QueryMode>("hybrid");
   const [isSending, setIsSending] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -138,7 +134,6 @@ function App() {
       const response = await queryMedical({
         question: trimmed,
         language,
-        mode,
       });
 
       setMessages((current) => [
@@ -270,18 +265,6 @@ function App() {
 
           <div className="composer-bar">
             <div className="composer-controls">
-              <label className="select-pill">
-                <span>{mode}</span>
-                <select value={mode} onChange={(event) => setMode(event.target.value as QueryMode)}>
-                  {modes.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={13} />
-              </label>
-
               <button
                 className="text-toggle"
                 type="button"
