@@ -146,8 +146,38 @@ _KEY_LABELS: dict[str, str] = {
 }
 
 
+# Fields that store comma-separated lists in the DB and should be split
+# before sending to LLM so it sees a proper array, not a raw blob string.
+_BLOB_FIELDS: frozenset[str] = frozenset({
+    "Triệu chứng", "Thuốc đề xuất", "Thuốc phổ biến", "Chi tiết thuốc",
+    "Nên ăn", "Không nên ăn", "Thực đơn gợi ý", "Phòng ngừa",
+    "Phương pháp chẩn đoán", "Phương pháp điều trị",
+})
+
+_MAX_LIST_ITEMS = 15   # Cap list length to prevent token overflow
+
+
+def _split_blob(value: str) -> list[str] | str:
+    """Split a comma-separated blob into a list if it has >= 2 items.
+
+    Drug and symptom fields in VietMedKG are stored as comma-separated
+    strings (e.g. "Viên nén Metformin, Viên nang Glibenclamide, ...").
+    Splitting them into arrays lets the LLM understand the list structure
+    instead of treating the whole blob as one drug name.
+    """
+    items = [x.strip() for x in value.split(",") if x.strip()]
+    if len(items) >= 2:
+        return items[:_MAX_LIST_ITEMS]
+    return value
+
+
 def _prepare_records_for_llm(records: list[dict]) -> tuple[str, str]:
-    """Truncate and localize records to fit within payload budget.
+    """Truncate, localize, and structure records for LLM payload.
+
+    Key improvements over raw JSON:
+    - Blob fields (drugs, symptoms, nutrition) are split into proper lists
+    - Field keys are translated to Vietnamese labels
+    - Total payload is capped to prevent context overflow
 
     Returns (json_string, note) where note is non-empty when records were cut.
     """
@@ -161,7 +191,7 @@ def _prepare_records_for_llm(records: list[dict]) -> tuple[str, str]:
 
     localized = []
     for r in truncated:
-        item: dict[str, str] = {}
+        item: dict = {}
         for k, v in r.items():
             if v is None:
                 continue
@@ -169,7 +199,13 @@ def _prepare_records_for_llm(records: list[dict]) -> tuple[str, str]:
             if not s or s in ("None", "null", "nan"):
                 continue
             label = _KEY_LABELS.get(k, k)
-            item[label] = s[:_MAX_FIELD_CHARS] + "..." if len(s) > _MAX_FIELD_CHARS else s
+            # Truncate long raw strings before splitting
+            s = s[:_MAX_FIELD_CHARS] + "..." if len(s) > _MAX_FIELD_CHARS else s
+            # Split blob fields into structured lists
+            if label in _BLOB_FIELDS:
+                item[label] = _split_blob(s)
+            else:
+                item[label] = s
         if item:
             localized.append(item)
 
@@ -179,9 +215,15 @@ def _prepare_records_for_llm(records: list[dict]) -> tuple[str, str]:
         ratio = _MAX_PAYLOAD_CHARS / total
         for r in localized:
             for label in list(r.keys()):
-                cap = max(50, int(len(r[label]) * ratio))
-                if len(r[label]) > cap:
-                    r[label] = r[label][:cap] + "..."
+                v = r[label]
+                if isinstance(v, list):
+                    # Trim list length proportionally
+                    cap = max(3, int(len(v) * ratio))
+                    r[label] = v[:cap]
+                elif isinstance(v, str):
+                    cap = max(50, int(len(v) * ratio))
+                    if len(v) > cap:
+                        r[label] = v[:cap] + "..."
 
     return json.dumps(localized, ensure_ascii=False, indent=2), note
 
@@ -233,15 +275,15 @@ async def synthesize_answer(question: str, records: list[dict]) -> str:
 
     system_prompt = (
         "# VAI TRÒ\n"
-        "Bạn là một trợ lý y tế tận tâm, thấu cảm và chuyên nghiệp của hệ thống AegisHealth.\n\n"
-        "# NGUYÊN TẮC CỐT LÕI (RẤT QUAN TRỌNG)\n"
-        "1. Tôn trọng dữ liệu: CHỈ SỬ DỤNG thông tin từ dữ liệu JSON được cung cấp. Tuyệt đối KHÔNG bịa đặt, suy đoán hoặc thêm thắt kiến thức y khoa bên ngoài.\n"
-        "2. Xử lý ngoại lệ: Nếu dữ liệu JSON trống hoặc không đủ để trả lời câu hỏi, hãy thành thật xin lỗi và thông báo rằng cơ sở dữ liệu hiện tại chưa có thông tin này.\n\n"
+        "Bạn là trợ lý y tế chuyên nghiệp của hệ thống AegisHealth.\n\n"
+        "# NGUYÊN TẮc CỐT LÕI\n"
+        "1. Chỉ dùng thông tin từ dữ liệu JSON được cung cấp. Tuyệt đối KHÔNG bỏ sung kiến thức bên ngoài.\n"
+        "2. Nếu dữ liệu đủ để trả lời → trình bày trực tiếp, tự tin, KHÔNG cần xây dựng câu dẫn bằng 'Xin lỗi' hay 'theo dữ liệu JSON'.\n"
+        "3. Nếu dữ liệu thực sự không có → nói ngắn gọn 'Cơ sở dữ liệu chưa có thông tin này.' (không cần xây dựng câu dài).\n\n"
         "# ĐỊNH DẠNG & PHONG CÁCH\n"
-        "- Giọng điệu: Ân cần, chuyên nghiệp và mang tính động viên.\n"
-        "- Cấu trúc: Mở đầu bằng một câu dẫn nhập tự nhiên -> Trình bày dữ liệu mạch lạc -> Kết thúc bằng một lời chúc hoặc động viên ngắn gọn.\n"
-        "- Markdown: Bắt buộc dùng in đậm (**) cho tên bệnh/tên thuốc, dùng gạch đầu dòng (-) khi liệt kê các mục.\n"
-        "- Emoji: Chèn các biểu tượng cảm xúc y khoa tinh tế (như 🩺, 💊, 🌿, 💡, 🛡️) để câu trả lời thân thiện, trực quan và không bị khô khan.\n\n"
+        "- Cấu trúc: câu dẫn ngắn → liệt kê dữ liệu mạch lạc → kết thúc bằng lời chúc ngắn.\n"
+        "- Markdown: in đậm (**) cho tên bệnh/thuốc, gạch đầu dòng (-) khi liệt kê.\n"
+        "- Emoji: dùng 😊, 💊, 🌿, 💡, 🛡️ tiếp thên, không quá 2 emoji/đoạn.\n\n"
         "# NGÔN NGỮ\n"
         "Luôn trả lời 100% bằng tiếng Việt tự nhiên."
     )

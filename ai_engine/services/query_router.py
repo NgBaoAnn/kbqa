@@ -121,6 +121,7 @@ _VALID_QUERY_TYPES: frozenset[str] = frozenset({
     # Forward (entity = disease name)
     "symptoms", "medicine", "treatment", "advice",
     "prevention", "department", "profile", "count",
+    "linked_diseases",
     # Reverse (entity = constraint keyword, not a disease name)
     "find_by_symptom", "find_by_medicine",
     "find_by_nutrition_avoid", "find_by_nutrition_eat",
@@ -145,7 +146,7 @@ def _clean_entity(raw: str) -> str | None:
     name = re.sub(r"\s+không$", "", name, flags=re.IGNORECASE)
     # Strip trailing question phrases before checking length (R3)
     name = re.sub(
-        r"\s+(?:như\s+thế\s+nào|thế\s+nào|là\s+gì|gồm\s+gì|thì\s+sao)\s*$",
+        r"\s+(?:như\s+thế\s+nào|thế\s+nào|là\s+gì|gồm\s+gì|thì\s+sao|có|không)\s*$",
         "", name, flags=re.IGNORECASE,
     )
     name = name.strip("[]").strip()
@@ -293,6 +294,22 @@ def classify_cypher_intent(question: str) -> tuple[str | None, str | None]:
         if m:
             return "find_by_prevention", _clean_entity(m.group(1))
 
+    # Linked diseases — "bệnh X liên quan đến bệnh nào"
+    # Must appear BEFORE profile patterns to prevent broad profile regex
+    # from swallowing "bệnh X liên quan đến..." queries.
+    # Pattern with explicit "có" MUST come first to prevent lazy (.+?) from
+    # capturing "có" as part of the entity in "viêm phổi có liên quan..."
+    for pattern in [
+        r"(?:bệnh\s+)?(.+?)\s+có\s+liên\s+quan\s+(?:đến|với)\s+(?:bệnh|những\s+bệnh)\s+(?:gì|nào)",
+        r"(?:bệnh\s+)?(.+?)\s+liên\s+quan\s+đến\s+(?:những\s+)?(?:bệnh|bệnh\s+lý)\s+(?:gì|nào)",
+        r"(?:bệnh\s+)?(.+?)\s+đi\s+kèm\s+(?:với\s+)?(?:bệnh|những\s+bệnh)\s+(?:gì|nào)",
+        r"bệnh\s+kèm\s+theo\s+(?:của\s+)?(?:bệnh\s+)?(.+?)(?:\?|$)",
+        r"comorbidities?\s+of\s+(.+?)(?:\?|$)",
+    ]:
+        m = re.search(pattern, q, re.IGNORECASE)
+        if m:
+            return "linked_diseases", _clean_entity(m.group(1))
+
     # Profile / general info
     for pattern in [
         r"(?:toàn\s+bộ\s+)?thông\s+tin\s+(?:về\s+)?(?:bệnh\s+)?(.+?)(?:\?|$)",
@@ -437,6 +454,15 @@ A: {"query_type": "find_by_symptom", "entity": "ho khan"}
 Q: "thuốc chữa viêm phổi"
 A: {"query_type": "medicine", "entity": "viêm phổi"}
 
+Q: "bệnh tiểu đường điều trị bằng thuốc gì"
+A: {"query_type": "medicine", "entity": "tiểu đường"}
+
+Q: "viêm phổi dùng thuốc gì"
+A: {"query_type": "medicine", "entity": "viêm phổi"}
+
+Q: "cao huyết áp uống thuốc gì"
+A: {"query_type": "medicine", "entity": "cao huyết áp"}
+
 Q: "thuốc Azithromycin chữa bệnh nào"
 A: {"query_type": "find_by_medicine", "entity": "Azithromycin"}
 
@@ -479,6 +505,18 @@ A: {"query_type": "find_by_prevention", "entity": "rửa tay"}
 Q: "tiêm vắc-xin BCG phòng bệnh gì"
 A: {"query_type": "find_by_prevention", "entity": "vắc-xin BCG"}
 
+Q: "bệnh tiểu đường liên quan đến những bệnh gì"
+A: {"query_type": "linked_diseases", "entity": "tiểu đường"}
+
+Q: "viêm phổi có liên quan đến bệnh nào"
+A: {"query_type": "linked_diseases", "entity": "viêm phổi"}
+
+Q: "bệnh nào đi kèm với tiểu đường"
+A: {"query_type": "linked_diseases", "entity": "tiểu đường"}
+
+Q: "tiêm vắc-xìn BCG phòng bệnh gì"
+A: {"query_type": "find_by_prevention", "entity": "vắc-xìn BCG"}
+
 Q: "bao nhiêu bệnh trong cơ sở dữ liệu"
 A: {"query_type": "count", "entity": null}
 
@@ -486,6 +524,18 @@ Q: "Việc tránh ăn [Dưa chua khô, Bia, Rượu trắng, Trứng cút] có t
 A: {"query_type": "unknown", "entity": null}
 
 Q: "Tôi nên làm gì khi bị stress công việc"
+A: {"query_type": "unknown", "entity": null}
+
+Q: "những bệnh nào thường gặp ở người cao tuổi"
+A: {"query_type": "unknown", "entity": null}
+
+Q: "bệnh nào phổ biến ở trẻ em"
+A: {"query_type": "unknown", "entity": null}
+
+Q: "người đái tháo đường cần chú ý gì"
+A: {"query_type": "unknown", "entity": null}
+
+Q: "bệnh mãn tính nào nguy hiểm nhất"
 A: {"query_type": "unknown", "entity": null}
 
 Q: "symptoms of diabetes"

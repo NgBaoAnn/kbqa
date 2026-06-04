@@ -247,7 +247,26 @@ async def query(
             "Querying LightRAG (mode=%s): %s", effective_mode, question[:100]
         )
 
-        param = QueryParam(mode=effective_mode, only_need_context=only_need_context)
+        # Medical-domain instructions injected into LightRAG's rag_response prompt
+        # via the {user_prompt} slot (operate.py L3261/3272).
+        # Purpose:
+        #   - Enforce Vietnamese response language (qwen2.5:3b sometimes defaults to English)
+        #   - Establish medical assistant persona (default prompt has no domain context)
+        #   - Prohibit medication dosage advice (liability)
+        #   - Prefer concise, structured answers (3B models tend to be verbose)
+        #   - Suppress References section (our response_formatter.py handles disclaimers)
+        MEDICAL_USER_PROMPT = (
+            "Bạn là trợ lý y tế AegisHealth. "
+            "Luôn trả lời bằng tiếng Việt, bất kể ngôn ngữ câu hỏi. "
+            "Câu trả lời phải ngắn gọn, súc tích, dùng danh sách gạch đầu dòng khi phù hợp. "
+            "KHÔNG đề xuất liều lượng thuốc cụ thể. "
+            "KHÔNG tạo mục References ở cuối câu trả lời."
+        )
+        param = QueryParam(
+            mode=effective_mode,
+            only_need_context=only_need_context,
+            user_prompt=MEDICAL_USER_PROMPT,
+        )
         result = await rag.aquery(question, param=param)
 
         logger.info(

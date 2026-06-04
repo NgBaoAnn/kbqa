@@ -17,37 +17,49 @@ logger = logging.getLogger(__name__)
 
 from ai_engine.utils.ui_constants import MEDICAL_DISCLAIMER
 
-# ── Dangerous symptom keywords for warning detection ──────────────────────
-DANGER_KEYWORDS = [
-    "đau ngực",
-    "khó thở",
-    "co giật",
-    "bất tỉnh",
-    "chảy máu",
+# ── Emergency QUESTION patterns — only match first-person urgent phrasing ──
+# IMPORTANT: Do NOT scan the ANSWER for these keywords.
+# Medical answers naturally mention "đau ngực", "khó thở" etc. when describing
+# disease symptoms — scanning answers causes massive false positives.
+# Only the QUESTION is scanned, and only when it reads as a real emergency
+# (first-person, present-tense, urgent) rather than an informational query.
+EMERGENCY_QUESTION_KEYWORDS = [
+    # First-person urgent: "tôi đang bị...", "tôi bị..."
+    "tôi đang bị",
+    "tôi bị ngất",
+    "tôi bị co giật",
+    "tôi bị ngộ độc",
+    "tôi muốn tự tử",
+    "tôi uống nhầm",
+    "tôi uống quá liều",
+    "giúp tôi với",
+    "cứu tôi",
+    # Third-person emergency
+    "bị đột quỵ",
+    "ngừng thở",
     "ngừng tim",
-    "đột quỵ",
-    "sốt cao",
-    "ngộ độc",
-    "tự tử",
-    "chest pain",
-    "difficulty breathing",
-    "seizure",
+    "bất tỉnh",
+    "hôn mê",
+    "chảy máu không cầm",
+    # English
+    "help me",
+    "i'm having a heart attack",
+    "call ambulance",
+    "overdose",
     "unconscious",
-    "bleeding",
-    "cardiac arrest",
-    "stroke",
-    "high fever",
-    "poisoning",
-    "suicide",
 ]
 
 
 def classify_response_type(question: str, answer: str) -> str:
-    """Classify the response type based on question and answer content.
+    """Classify the response type based on question intent.
 
-    Uses intent_classifier for strong regex-based emergency detection on
-    the question, then falls back to keyword matching on the answer for
-    additional coverage. Combines both approaches for best accuracy.
+    Emergency detection uses TWO layers, both on the QUESTION only:
+      1. intent_classifier.detect_emergency_intent() — strong regex patterns
+      2. EMERGENCY_QUESTION_KEYWORDS — first-person/urgent phrasing fallback
+
+    The ANSWER is intentionally NOT scanned for emergency keywords because
+    medical answers naturally describe dangerous symptoms (e.g. "đau ngực"
+    appears in any cardiac disease answer) causing massive false positives.
 
     Args:
         question: The original user question.
@@ -56,16 +68,17 @@ def classify_response_type(question: str, answer: str) -> str:
     Returns:
         One of: 'warning', 'table', 'text'.
     """
-    # 1. Priority: Detect emergency from QUESTION (intent_classifier — stronger regex patterns)
+    q_lower = question.lower()
+
+    # 1. Priority: Detect emergency from QUESTION via intent_classifier (regex-based)
     if detect_emergency_intent(question):
-        logger.info("Emergency intent detected via intent_classifier (question)")
+        logger.info("Emergency intent detected via intent_classifier: '%s'", question[:60])
         return "warning"
 
-    # 2. Fallback: Detect emergency from ANSWER (keyword matching)
-    combined = (question + " " + answer).lower()
-    for keyword in DANGER_KEYWORDS:
-        if keyword in combined:
-            logger.info("Emergency keyword detected: '%s'", keyword)
+    # 2. Fallback: scan QUESTION only for urgent first-person phrasing
+    for keyword in EMERGENCY_QUESTION_KEYWORDS:
+        if keyword in q_lower:
+            logger.info("Emergency keyword in question: '%s'", keyword)
             return "warning"
 
     # 3. Detect list intent from question + verify answer has list structure
@@ -75,9 +88,6 @@ def classify_response_type(question: str, answer: str) -> str:
             return "table"
 
     # 4. Check for list-like content in answer → table
-    answer_lower = answer.lower()
-
-    # Count items that look like a list (lines starting with - or • or numbers)
     list_items = re.findall(r"^[\s]*[-•\d.]+\s+\S", answer, re.MULTILINE)
     if len(list_items) >= 2:
         return "table"
@@ -138,6 +148,82 @@ def format_warning_answer(answer: str) -> str:
     return answer + emergency_cta
 
 
+# ── Query types that require a medical disclaimer ─────────────────────────
+# Disclaimer appears ONLY for queries where medical advice is actionable.
+# Navigational/factual queries (department, linked_diseases, find_by_*,
+# count) do NOT get a disclaimer.
+_DISCLAIMER_MODES = {
+    # Direct medical advice — user may act on this info
+    "symptoms", "medicine", "treatment", "advice", "prevention", "profile",
+}
+_NO_DISCLAIMER_MODES = {
+    # Purely informational / navigational — no disclaimer needed
+    "count", "count_by_type", "disambiguation",
+    "department",                           # just which clinic to go to
+    "linked_diseases", "linked_with_info",  # factual disease relationships
+    "find_by_symptom", "find_by_medicine",  # reverse lookup, not advice
+    "find_by_nutrition_avoid", "find_by_nutrition_eat",
+    "find_by_prevention",
+}
+
+# Keywords in the QUESTION that signal medical-advice intent for LightRAG path.
+# Only checked when query_mode is a LightRAG semantic mode (mix/naive/...).
+_ADVICE_QUESTION_KEYWORDS = (
+    "triệu chứng", "chẩn đoán", "điều trị", "thuốc", "chữa",
+    "phòng ngừa", "phòng tránh", "nên ăn", "không nên ăn", "kiêng",
+    "lời khuyên", "tư vấn", "nguy hiểm", "biến chứng",
+    "symptoms", "diagnos", "treat", "medicine", "drug",
+)
+
+
+def _is_medical_advice_question(question: str) -> bool:
+    """Return True if the question asks for medical advice / diagnosis / treatment.
+
+    Used to conditionally suppress the disclaimer on LightRAG semantic paths
+    when the question is clearly navigational (e.g. 'bệnh nào phổ biến ở trẻ em').
+    """
+    q_lower = question.lower()
+    return any(kw in q_lower for kw in _ADVICE_QUESTION_KEYWORDS)
+
+
+def _needs_disclaimer(query_mode: str, question: str = "") -> bool:
+    """Return True when the response needs a MEDICAL_DISCLAIMER appended.
+
+    Rules:
+    - LightRAG / mix / naive / local / global paths  → only when question has
+      medical-advice keywords (symptoms, treatment, drugs, diet advice...)
+    - Cypher template with medical query type         → show
+    - Cypher navigational types (department, find_by_*, linked_*)  → suppress
+    - Cypher count / disambiguation                   → suppress
+    - LLM-generated Cypher (type=None)                → check question
+
+    Args:
+        query_mode: The query_mode string from metadata
+                    (e.g. 'cypher:template:symptoms', 'mix', 'naive').
+        question:   The original user question (used for LightRAG path).
+    Returns:
+        True if disclaimer should be appended.
+    """
+    # LightRAG semantic paths — only show when medical-advice question
+    if query_mode in ("mix", "naive", "local", "global", "hybrid"):
+        return _is_medical_advice_question(question)
+    # cypher:template:<type>  or  cypher:llm:<type>  or  cypher:disambiguation
+    parts = query_mode.split(":")
+    if len(parts) >= 3:
+        query_type = parts[2]
+        if query_type in _NO_DISCLAIMER_MODES:
+            return False
+        if query_type in _DISCLAIMER_MODES:
+            return True
+        # LLM-generated Cypher (type=None or unknown) → check question
+        return _is_medical_advice_question(question)
+    # cypher:disambiguation  (2-part)
+    if "disambiguation" in query_mode:
+        return False
+    # Fallback: check question
+    return _is_medical_advice_question(question)
+
+
 def format_lightrag_response(
     raw_answer: str,
     question: str,
@@ -162,10 +248,7 @@ def format_lightrag_response(
         return {
             "status": "success",
             "response_type": "text",
-            "answer": (
-                "Không tìm thấy thông tin về chủ đề này trong cơ sở dữ liệu."
-                + MEDICAL_DISCLAIMER
-            ),
+            "answer": "Không tìm thấy thông tin về chủ đề này trong cơ sở dữ liệu.",
             "data": None,
             "metadata": {
                 "query_mode": query_mode,
@@ -177,23 +260,23 @@ def format_lightrag_response(
 
     # Classify response type
     response_type = classify_response_type(question, raw_answer)
+    show_disclaimer = _needs_disclaimer(query_mode, question)
 
     # Build answer based on type
     answer = raw_answer.strip()
     data = None
 
     if response_type == "warning":
+        # Warning already includes emergency CTA — no additional disclaimer needed
         answer = format_warning_answer(answer)
     elif response_type == "table":
         data = extract_table_data(answer)
-    else:
-        # Ensure disclaimer is appended for text responses
-        if MEDICAL_DISCLAIMER.strip() not in answer:
+        if show_disclaimer and MEDICAL_DISCLAIMER.strip() not in answer:
             answer += MEDICAL_DISCLAIMER
-
-    # For table type, also ensure disclaimer in the answer text
-    if response_type == "table" and MEDICAL_DISCLAIMER.strip() not in answer:
-        answer += MEDICAL_DISCLAIMER
+    else:
+        # text
+        if show_disclaimer and MEDICAL_DISCLAIMER.strip() not in answer:
+            answer += MEDICAL_DISCLAIMER
 
     return {
         "status": "success",
