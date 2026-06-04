@@ -1,0 +1,1292 @@
+% !TEX TS-program = xelatex
+% !TEX encoding = UTF-8 Unicode
+%==============================================================
+% AegisHealth KBQA -- Seminar Beamer Slides (Tiếng Việt có dấu)
+% COMPILER: XeLaTeX
+%==============================================================
+\documentclass[aspectratio=169, 11pt]{beamer}
+
+%--------------------------------------------------------------
+% FONT & NGÔN NGỮ
+%--------------------------------------------------------------
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setmainlanguage{vietnamese}
+\setotherlanguage{english}
+\setmainfont{Latin Modern Roman}
+\setsansfont{Latin Modern Sans}
+\setmonofont{DejaVu Sans Mono}
+
+%--------------------------------------------------------------
+% THEME & MÀU SẮC
+%--------------------------------------------------------------
+\usetheme{metropolis}
+\usepackage{xcolor}
+
+\definecolor{medBlue}{RGB}{10,60,120}
+\definecolor{tealAccent}{RGB}{0,150,136}
+\definecolor{lightBg}{RGB}{235,244,255}
+\definecolor{warnOrange}{RGB}{220,90,0}
+\definecolor{successGreen}{RGB}{40,120,45}
+\definecolor{errorRed}{RGB}{190,35,35}
+\definecolor{grayText}{RGB}{90,90,100}
+\definecolor{purpleNode}{RGB}{100,40,160}
+
+\setbeamercolor{frametitle}{bg=medBlue, fg=white}
+\setbeamercolor{title}{fg=medBlue}
+\setbeamercolor{subtitle}{fg=tealAccent}
+\setbeamercolor{structure}{fg=medBlue}
+\setbeamercolor{alerted text}{fg=warnOrange}
+\setbeamertemplate{navigation symbols}{}
+\setbeamerfont{frametitle}{size=\large, series=\bfseries}
+
+%--------------------------------------------------------------
+% GÓI & TIKZ
+%--------------------------------------------------------------
+\usepackage{graphicx}
+\usepackage{adjustbox}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{listings}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc, fit, shadows}
+
+%--------------------------------------------------------------
+% TIKZ STYLES
+%--------------------------------------------------------------
+\tikzset{
+  % Mũi tên chuẩn
+  arr/.style={-Stealth, line width=1.4pt, color=medBlue},
+  arrteal/.style={-Stealth, line width=1.4pt, color=tealAccent},
+  arrgreen/.style={-Stealth, line width=1.4pt, color=successGreen},
+  arrorange/.style={-Stealth, line width=1.4pt, color=warnOrange},
+  % Hộp tổng quát
+  card/.style={
+    rectangle, rounded corners=6pt,
+    draw=#1!80, line width=1.4pt,
+    fill=#1!10, align=center,
+    minimum height=1.1cm, minimum width=3cm,
+    font=\small\bfseries, text=#1!80!black,
+    drop shadow={shadow xshift=1pt, shadow yshift=-1pt, fill=#1!30, opacity=0.4}
+  },
+  card/.default=medBlue,
+  % Hộp to
+  bigcard/.style={
+    rectangle, rounded corners=8pt,
+    draw=#1!80, line width=1.6pt,
+    fill=#1!12, align=center,
+    minimum height=1.3cm, minimum width=4.5cm,
+    font=\normalsize\bfseries, text=#1!80!black,
+    drop shadow={shadow xshift=1pt, shadow yshift=-1pt, fill=#1!25, opacity=0.35}
+  },
+  bigcard/.default=medBlue,
+  % Hộp số bước
+  stepbox/.style={
+    rectangle, rounded corners=5pt,
+    draw=#1, line width=1.2pt, fill=#1!10,
+    align=center, minimum height=0.8cm,
+    minimum width=5.2cm, font=\footnotesize\bfseries
+  },
+  stepbox/.default=medBlue,
+  % Badge số thứ tự
+  badge/.style={
+    circle, draw=#1!80, line width=1pt,
+    fill=#1, minimum size=0.55cm,
+    font=\scriptsize\bfseries\color{white}
+  },
+  badge/.default=medBlue,
+}
+
+%--------------------------------------------------------------
+% LISTING
+%--------------------------------------------------------------
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{medBlue}\bfseries,
+  commentstyle=\color{grayText}\itshape,
+  stringstyle=\color{tealAccent},
+  breaklines=true, frame=single,
+  rulecolor=\color{medBlue!40},
+  backgroundcolor=\color{lightBg},
+  numbers=left, numberstyle=\tiny\color{grayText},
+}
+
+%--------------------------------------------------------------
+% THÔNG TIN
+%--------------------------------------------------------------
+\title{\textbf{AegisHealth KBQA}\\[0.3em]
+       \normalsize Knowledge Base Question-Answering\\cho Y tế Việt Nam}
+\subtitle{Đề tài \#3 --- Seminar Báo cáo Đồ án Môn học}
+
+%==============================================================
+\begin{document}
+%==============================================================
+
+\begin{frame}[plain]
+  \titlepage
+\end{frame}
+
+\begin{frame}{Nội dung trình bày}
+  \begin{columns}[t]
+    \begin{column}{0.48\textwidth}
+      \begin{enumerate}
+        \item \textbf{Bài toán \& Động cơ}
+        \item \textbf{Giải pháp NLP đề xuất}
+        \item \textbf{Kiến trúc hệ thống}
+        \item \textbf{Quản lý dữ liệu}
+        \item \textbf{Chọn mô hình \& Đánh giá}
+        \item \textbf{Triển khai}
+      \end{enumerate}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{enumerate}
+        \setcounter{enumi}{6}
+        \item \textbf{Agentic AI}
+        \item \textbf{Học liên tục \& Giám sát}
+        \item \textbf{Bảo mật \& Độ bền}
+        \item \textbf{Quản lý dự án}
+        \item \textbf{Đạo đức \& AI có trách nhiệm}
+      \end{enumerate}
+      \vspace{0.4em}
+      \begin{block}{Tech Stack}
+        \scriptsize
+        FastAPI $\cdot$ Neo4j AuraDB $\cdot$ Qdrant Cloud\\
+        LightRAG $\cdot$ Ollama (Qwen2.5) $\cdot$ BGE-M3\\
+        React + TypeScript + Vite
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%==============================================================
+\section{1. Bài toán \& Động cơ}
+%==============================================================
+
+\begin{frame}{Vấn đề thực tế}
+  \begin{columns}[t]
+    \begin{column}{0.52\textwidth}
+      \begin{itemize}
+        \item<1-> \textbf{Khoảng trống:} Thiếu hệ thống tra cứu y tế
+          tiếng Việt bằng ngôn ngữ tự nhiên
+        \item<2-> \textbf{Hạn chế hiện tại:} Google/wiki trả về document
+          --- không trả lời câu hỏi cụ thể
+        \item<3-> \textbf{Ví dụ điển hình:}\\[3pt]
+          \textit{``Bệnh tiểu đường có triệu chứng gì?''}\\
+          $\rightarrow$ Cần câu trả lời trực tiếp
+      \end{itemize}
+      \vspace{0.4em}
+      \onslide<4->{
+        \begin{alertblock}{Giải pháp}
+          KBQA = trả lời trực tiếp từ\\
+          Knowledge Graph VietMedKG
+        \end{alertblock}
+      }
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \begin{center}
+      \begin{adjustbox}{max width=\linewidth, max height=0.75\textheight, keepaspectratio}
+\begin{tikzpicture}
+        % Hộp cũ
+        \node[card=errorRed, minimum width=4.2cm, minimum height=1.4cm,
+              text width=3.8cm] (old) at (0,0)
+          {\textcolor{errorRed}{\textbf{Tìm kiếm cũ}}\\[2pt]
+           \scriptsize Query $\to$ 10 đường link\\Người dùng tự đọc};
+        % Mũi tên chuyển đổi
+        \node[font=\Large\bfseries, color=successGreen] at (0,-1.1) {$\Downarrow$};
+        % Hộp mới
+        \node[card=successGreen, minimum width=4.2cm, minimum height=1.4cm,
+              text width=3.8cm] (new) at (0,-2.2)
+          {\textcolor{successGreen}{\textbf{AegisHealth KBQA}}\\[2pt]
+           \scriptsize Câu hỏi $\to$ Câu trả lời\\Trực tiếp từ Knowledge Graph};
+      \end{tikzpicture}
+\end{adjustbox}
+      \end{center}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Phạm vi \& Đối tượng}
+  \begin{columns}[t]
+    \begin{column}{0.52\textwidth}
+      \textbf{Đối tượng sử dụng:}
+      \begin{itemize}
+        \item Người dân: tra cứu thông tin sức khỏe
+        \item Sinh viên y khoa: học tập nhanh
+        \item Nhân viên y tế: tra cứu thuốc, triệu chứng
+      \end{itemize}
+      \vspace{0.5em}
+      \textbf{Câu hỏi hệ thống có thể trả lời:}
+      \begin{itemize}
+        \scriptsize
+        \item \textit{``Bệnh tiểu đường có triệu chứng gì?''}
+        \item \textit{``Thuốc Metformin chữa bệnh gì?''}
+        \item \textit{``Bệnh gút nên kiêng ăn gì?''}
+        \item \textit{``Có bao nhiêu bệnh liên quan đến gan?''}
+        \item \textit{``Tại sao phụ nữ sau sinh hay thiếu máu?''}
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \begin{block}{Phạm vi dự án}
+        \textbf{Dữ liệu:} VietMedKG\\
+        (Vietnamese Medical Knowledge Graph)\\[4pt]
+        \textbf{Ngôn ngữ:} Tiếng Việt (chính)\\[4pt]
+        \textbf{Giao diện:} Chat interface\\
+        React + TypeScript
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%==============================================================
+\section{2. Giải pháp NLP đề xuất}
+%==============================================================
+
+% ── DIAGRAM 1: Hybrid Dual-Path ──────────────────────────────
+\begin{frame}{Kiến trúc tổng quan --- Hybrid Dual-Path}
+\begin{center}
+\begin{adjustbox}{max width=\linewidth, max height=0.75\textheight, keepaspectratio}
+\begin{tikzpicture}[node distance=0.9cm]
+  % Input
+  \node[bigcard=medBlue, minimum width=5.5cm] (input)
+    {Câu hỏi Tiếng Việt};
+
+  % Router
+  \node[bigcard=tealAccent, minimum width=5.5cm, below=0.7cm of input] (router)
+    {Query Router\\[2pt]\scriptsize\normalfont Regex 50+ mẫu + LLM Qwen2.5};
+  \draw[arr] (input) -- (router);
+
+  % Hai path
+  \node[card=medBlue, minimum width=3.6cm, minimum height=1.3cm,
+        text width=3.4cm, below left=0.7cm and 1.6cm of router] (cypher)
+    {\textbf{CYPHER Path}\\[2pt]\scriptsize Neo4j AuraDB\\VietMedKG Graph};
+
+  \node[card=tealAccent, minimum width=3.6cm, minimum height=1.3cm,
+        text width=3.4cm, below right=0.7cm and 1.6cm of router] (lightrag)
+    {\textbf{LightRAG Path}\\[2pt]\scriptsize Qdrant Cloud\\BGE-M3 mix mode};
+
+  \draw[arr] (router.south west) -- node[left, font=\scriptsize\color{medBlue}]{Intent rõ} (cypher.north);
+  \draw[arrteal] (router.south east) -- node[right, font=\scriptsize\color{tealAccent}]{Mơ hồ} (lightrag.north);
+
+  % LLM tổng hợp
+  \node[bigcard=purpleNode, minimum width=5.5cm,
+        below=0.7cm of cypher, xshift=1.6cm] (llm)
+    {Qwen2.5 --- Tổng hợp câu trả lời};
+  \draw[arr, color=purpleNode] (cypher.south) -- (llm.north west);
+  \draw[arr, color=purpleNode] (lightrag.south) -- (llm.north east);
+
+  % Output
+  \node[card=successGreen, minimum width=5.5cm, minimum height=1cm,
+        text width=5.2cm, below=0.7cm of llm] (out)
+    {\scriptsize \{status, response\_type, answer, data, metadata\}};
+  \draw[arrgreen] (llm) -- (out);
+\end{tikzpicture}
+\end{adjustbox}
+\end{center}
+\end{frame}
+
+% ── DIAGRAM 2: Pipeline 8 bước ───────────────────────────────
+\begin{frame}{Pipeline 8 bước xử lý}
+\begin{center}
+\begin{adjustbox}{max width=\linewidth, max height=0.75\textheight, keepaspectratio}
+\begin{tikzpicture}[
+  box/.style={
+    rectangle, rounded corners=6pt,
+    draw=#1, line width=1.4pt, fill=#1!8,
+    align=center, minimum height=0.9cm,
+    minimum width=3.8cm, font=\scriptsize\bfseries
+  },
+  box/.default=medBlue,
+  node distance=0.7cm and 0.6cm
+]
+  % Hàng 1 (trái sang phải)
+  \node[box] (b0) at (0,0) {\badge{0} Timeout 120s};
+  \node[box, right=of b0] (b1) {\badge{1} Chuẩn hóa};
+  \node[box, right=of b1] (b2) {\badge{2} Mode Override};
+  
+  % Hàng 2 (phải sang trái)
+  \node[box=tealAccent, below=of b2] (b3) {\badge[tealAccent]{3} Phân loại Intent};
+  \node[box=warnOrange, left=of b3] (b4) {\badge[warnOrange]{4} Nhánh Reverse};
+  \node[box=warnOrange, left=of b4] (b5) {\badge[warnOrange]{5} Nhánh Count};
+  
+  % Hàng 3 (trái sang phải)
+  \node[box=medBlue, below=of b5] (b6) {\badge{6} Định danh Entity};
+  \node[box=successGreen, right=of b6] (b7) {\badge[successGreen]{7} CYPHER Path};
+  \node[box=tealAccent, right=of b7] (b8) {\badge[tealAccent]{8} LightRAG Path};
+
+  % Đường dẫn chính (S-curve)
+  \draw[arr] (b0) -- (b1);
+  \draw[arr] (b1) -- (b2);
+  \draw[arr] (b2) -- (b3);
+  \draw[arr] (b3) -- (b4);
+  \draw[arr] (b4) -- (b5);
+  \draw[arr] (b5) -- (b6);
+  \draw[arrgreen] (b6) -- (b7);
+
+  % Đường rẽ nhánh (Fallback / Direct to LightRAG)
+  % Từ b2 vòng ra ngoài bên phải xuống b8
+  \draw[arrteal, dashed] (b2.east) -- ++(0.4, 0) |- node[pos=0.25, right, font=\tiny\color{tealAccent}]{Force = True} (b8.east);
+  % Từ b3 xuống thẳng b8
+  \draw[arrteal, dashed] (b3.south) -- node[right, font=\tiny\color{tealAccent}]{Mơ hồ} (b8.north);
+  % Từ b6 vòng xuống dưới lên b8
+  \draw[arrteal, dashed] (b6.south) |- ++(0,-0.4) -| node[pos=0.25, below, font=\tiny\color{tealAccent}]{Không thấy Entity} (b8.south);
+
+\end{tikzpicture}
+\end{adjustbox}
+\end{center}
+\end{frame}
+
+\begin{frame}{Hai đường xử lý (Dual-Path)}
+  \begin{columns}[t]
+    \begin{column}{0.48\textwidth}
+      \begin{block}{CYPHER Path}
+        \scriptsize
+        \textbf{Khi nào:} Intent rõ ràng + entity tìm thấy trong KG\\[3pt]
+        \textbf{Luồng:} Intent $\to$ Định danh Entity\\
+        $\to$ Template Cypher / LLM Text2Cypher\\
+        $\to$ Neo4j $\to$ LLM Tổng hợp\\[3pt]
+        \textbf{Ưu điểm:}\\
+        \textcolor{successGreen}{\checkmark} Chính xác (dữ liệu từ graph)\\
+        \textcolor{successGreen}{\checkmark} Nhanh: \textbf{5--20 giây}
+      \end{block}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{block}{LightRAG Path}
+        \scriptsize
+        \textbf{Khi nào:} Entity không rõ, câu hỏi mở\\[3pt]
+        \textbf{Luồng:} Câu hỏi $\to$ BGE-M3 Embedding\\
+        $\to$ Qdrant + Neo4j :base (mix mode)\\
+        $\to$ LLM Tổng hợp\\[3pt]
+        \textbf{Ưu điểm:}\\
+        \textcolor{successGreen}{\checkmark} Hiểu ngữ nghĩa sâu\\
+        \textcolor{successGreen}{\checkmark} Bao phủ câu hỏi open-ended\\
+        \textcolor{warnOrange}{$\sim$} Chậm hơn: \textbf{30--70 giây}
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Query Router --- Phân loại Câu hỏi}
+  \begin{columns}[t]
+    \begin{column}{0.50\textwidth}
+      \textbf{Regex Fast Path (50+ mẫu):}
+      \begin{itemize}
+        \scriptsize
+        \item \textbf{Forward queries} (entity = tên bệnh):\\
+          \texttt{symptoms, medicine, treatment,}\\
+          \texttt{advice, prevention, department,}\\
+          \texttt{profile, linked\_diseases}
+        \item \textbf{Reverse queries} (entity = từ khóa):\\
+          \texttt{find\_by\_symptom, find\_by\_medicine,}\\
+          \texttt{find\_by\_nutrition\_avoid/eat}
+        \item \textbf{Thống kê:} \texttt{count}
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \textbf{LLM Fallback (Qwen2.5):}
+      \begin{itemize}
+        \scriptsize
+        \item System prompt: 25+ few-shot examples
+        \item Temperature = 0.0 (xác định)
+        \item Output JSON chuẩn
+      \end{itemize}
+      \begin{block}{Ví dụ}
+        \scriptsize
+        Input: \textit{``Thuốc Metformin chữa bệnh gì?''}\\[3pt]
+        LLM $\to$ \texttt{\{"query\_type":}\\
+        \quad\texttt{"find\_by\_medicine",}\\
+        \quad\texttt{"entity": "Metformin"\}}
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{15 Mẫu Cypher \& Định danh Entity}
+  \begin{columns}[t]
+    \begin{column}{0.48\textwidth}
+      \textbf{15 Cypher Templates:}
+      \begin{itemize}
+        \scriptsize
+        \item \texttt{symptoms} --- Triệu chứng bệnh
+        \item \texttt{medicine} --- Thuốc chữa trị
+        \item \texttt{treatment} --- Phương pháp điều trị
+        \item \texttt{advice} --- Lời khuyên sức khỏe
+        \item \texttt{prevention} --- Phòng bệnh
+        \item \texttt{department} --- Khoa chuyên trị
+        \item \texttt{profile} --- Tổng quan bệnh
+        \item \texttt{linked\_diseases} --- Bệnh liên quan
+        \item \texttt{find\_by\_symptom / medicine / ...}
+        \item \texttt{count} --- Thống kê
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \textbf{Định danh Entity:}
+      \begin{enumerate}
+        \scriptsize
+        \item Fuzzy match Cypher:\\
+          \texttt{CONTAINS toLower(entity)}
+        \item Chấm điểm theo mức:\\
+          Khớp hoàn toàn (4) $>$ benh+exact (3)\\
+          $>$ bắt đầu bằng (2) $>$ chứa (1)
+        \item 1 kết quả $\to$ dùng trực tiếp
+        \item Nhiều kết quả $\to$ hỏi lại người dùng
+        \item Không tìm thấy $\to$ LightRAG fallback
+      \end{enumerate}
+      \vspace{0.3em}
+      \begin{alertblock}{Lưu ý}
+        \scriptsize ``hen suyễn'' $\to$ 28 kết quả\\
+        $\to$ Hệ thống hỏi lại người dùng
+      \end{alertblock}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ── DIAGRAM 3: Response Types ─────────────────────────────────
+\begin{frame}{Định dạng Response --- Backend-Driven UI}
+\begin{center}
+\begin{adjustbox}{max width=\linewidth, max height=0.75\textheight, keepaspectratio}
+\begin{tikzpicture}[node distance=1.0cm]
+  % Pipeline
+  \node[bigcard=tealAccent, minimum width=4.5cm] (p)
+    {Pipeline Điều phối};
+
+  % Ba loại response
+  \node[card=medBlue, minimum width=3.4cm, minimum height=1.4cm,
+        text width=3.2cm, below left=1.0cm and 2.2cm of p] (txt)
+    {\textbf{text}\\[2pt]\scriptsize Văn bản Markdown\\câu trả lời tường thuật};
+
+  \node[card=medBlue, minimum width=3.4cm, minimum height=1.4cm,
+        text width=3.2cm, below=1.0cm of p] (tbl)
+    {\textbf{table}\\[2pt]\scriptsize Danh sách có cấu trúc\\thuốc, triệu chứng...};
+
+  \node[card=warnOrange, minimum width=3.4cm, minimum height=1.4cm,
+        text width=3.2cm, below right=1.0cm and 2.2cm of p] (wrn)
+    {\textcolor{warnOrange}{\textbf{warning}}\\[2pt]\scriptsize CẢNH BÁO KHẨN CẤP\\GỌI 115 ngay!};
+
+  \draw[arr] (p.south west) -- (txt.north);
+  \draw[arr] (p.south) -- (tbl.north);
+  \draw[arrorange] (p.south east) -- (wrn.north);
+
+  % Disclaimer
+  \node[card=successGreen, minimum width=10.5cm, minimum height=0.9cm,
+        text width=10.2cm, below=1.0cm of tbl] (disc)
+    {\scriptsize\textbf{Medical Disclaimer} tự động --- áp dụng cho: symptoms / medicine / treatment / advice / prevention / profile};
+  \draw[arrgreen] (txt.south) -- ++(0,-0.3) -| (disc.north west);
+  \draw[arrgreen] (tbl.south) -- (disc.north);
+  \draw[arrgreen] (wrn.south) -- ++(0,-0.3) -| (disc.north east);
+\end{tikzpicture}
+\end{adjustbox}
+\end{center}
+\end{frame}
+
+%==============================================================
+\section{3. Kiến trúc hệ thống}
+%==============================================================
+
+% ── DIAGRAM 4: System Architecture ───────────────────────────
+\begin{frame}{Kiến trúc toàn hệ thống}
+\begin{center}
+\begin{adjustbox}{max width=\linewidth, max height=0.75\textheight, keepaspectratio}
+\begin{tikzpicture}
+  % ── Tầng 1: Client ──
+  \node[card=medBlue, minimum width=3.4cm, minimum height=1.3cm,
+        text width=3.2cm] (fe) at (-4.5, 1.8)
+    {\textbf{Frontend}\\[2pt]\scriptsize React + TypeScript\\Vite · cổng 5173};
+
+  % ── Tầng 2: Server ──
+  \node[card=medBlue, minimum width=3.4cm, minimum height=1.3cm,
+        text width=3.2cm] (be) at (0, 1.8)
+    {\textbf{Backend}\\[2pt]\scriptsize FastAPI + Uvicorn\\cổng 8000};
+
+  \node[card=tealAccent, minimum width=3.4cm, minimum height=1.3cm,
+        text width=3.2cm] (ai) at (4.5, 1.8)
+    {\textbf{AI Engine}\\[2pt]\scriptsize Pipeline + Router\\+ Formatters};
+
+  \draw[arr, <->] (fe) -- node[above, font=\scriptsize]{REST/JSON} (be);
+  \draw[arr] (be) -- (ai);
+
+  % ── Tầng 3: Storage ──
+  \node[card=warnOrange, minimum width=3.0cm, minimum height=1.3cm,
+        text width=2.8cm] (neo) at (-2.2, -0.6)
+    {\textbf{Neo4j AuraDB}\\[2pt]\scriptsize VietMedKG Graph\\+ LightRAG :base};
+
+  \node[card=warnOrange, minimum width=3.0cm, minimum height=1.3cm,
+        text width=2.8cm] (qd) at (1.5, -0.6)
+    {\textbf{Qdrant Cloud}\\[2pt]\scriptsize BGE-M3 Vectors\\1024 chiều};
+
+  \node[card=successGreen, minimum width=3.0cm, minimum height=1.3cm,
+        text width=2.8cm] (ol) at (5.2, -0.6)
+    {\textbf{Ollama Local}\\[2pt]\scriptsize Qwen2.5 + BGE-M3\\cổng 11434};
+
+  \draw[arr, color=warnOrange] (ai.south) -- ++(0,-0.5) -- ++(-6.7,0) -- (neo.north);
+  \draw[arr, color=warnOrange] (ai.south) -- ++(0,-0.5) -- ++(-3.0,0) -- (qd.north);
+  \draw[arr, color=successGreen] (ai.south) -- (ol.north);
+\end{tikzpicture}
+\end{adjustbox}
+\end{center}
+\end{frame}
+
+\begin{frame}{Cấu trúc thư mục \& API Endpoints}
+  \begin{columns}[t]
+    \begin{column}{0.52\textwidth}
+      \textbf{Cấu trúc dự án:}
+      \begin{itemize}
+        \scriptsize
+        \item \texttt{ai\_engine/} --- Lõi AI
+          \begin{itemize}
+            \item \texttt{services/} --- router, template, text2cypher, lightrag
+            \item \texttt{utils/} --- formatter, validator, sanitizer
+            \item \texttt{eval/} --- Benchmark 45 test cases
+          \end{itemize}
+        \item \texttt{backend/app/} --- FastAPI server
+          \begin{itemize}
+            \item \texttt{routers/} --- query.py, health.py, schema.py
+            \item \texttt{services/} --- pipeline.py (472 dòng)
+          \end{itemize}
+        \item \texttt{frontend/src/} --- Giao diện chat React
+        \item \texttt{etl/} --- Pipeline dữ liệu
+        \item \texttt{docs/} --- 15+ tài liệu thiết kế
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \textbf{API Endpoints:}
+      \begin{itemize}
+        \scriptsize
+        \item \texttt{POST /api/v1/query}\\Hỏi đáp y tế (endpoint chính)
+        \item \texttt{GET /api/v1/health}\\Kiểm tra 4 dịch vụ
+        \item \texttt{GET /api/v1/schema}\\Schema graph + số lượng node
+        \item \texttt{GET /docs}\\Swagger UI tự sinh
+      \end{itemize}
+      \vspace{0.4em}
+      \begin{block}{Yêu cầu / Phản hồi}
+        \scriptsize
+        \textbf{Input:} \texttt{\{question, mode?\}}\\[3pt]
+        \textbf{Output:}\\
+        \texttt{\{status, response\_type,}\\
+        \texttt{\ answer, data, metadata\}}
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%==============================================================
+\section{4. Quản lý dữ liệu}
+%==============================================================
+
+\begin{frame}{Nguồn dữ liệu --- VietMedKG}
+  \begin{columns}[t]
+    \begin{column}{0.54\textwidth}
+      \begin{itemize}
+        \item \textbf{Dataset:} VietMedKG --- Vietnamese Medical KG
+        \item \textbf{Nguồn:} Công bố tại ACM TALLIP 2025
+        \item \textbf{Quy mô:} $\sim$8,000+ bệnh, 63 MB CSV
+        \item \textbf{Nội dung:} Thu thập từ website y tế uy tín VN
+        \item \textbf{Giấy phép:} Public dataset học thuật
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \begin{block}{Số liệu thực tế}
+        \textbf{Neo4j (Đồ thị):}\\
+        $\sim$34,955 thực thể (nhãn base)\\
+        $\sim$48,125 quan hệ\\[4pt]
+        \textbf{Qdrant (Vector):}\\
+        3 collections: entities,\\
+        relationships, chunks\\
+        Chiều embedding: \textbf{1024}
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ── DIAGRAM 5: ETL Pipeline ───────────────────────────────────
+\begin{frame}{Pipeline ETL (Thu thập $\to$ Đồ thị)}
+\begin{center}
+\begin{adjustbox}{max width=\linewidth, max height=0.75\textheight, keepaspectratio}
+\begin{tikzpicture}[node distance=1.2cm]
+  % Stage 1
+  \node[card=grayText, minimum width=2.8cm, minimum height=1.4cm,
+        text width=2.6cm] (raw)
+    {\textbf{CSV Thô}\\[2pt]\scriptsize VietMedKG\\63 MB};
+
+  % Stage 2
+  \node[card=medBlue, minimum width=3.0cm, minimum height=1.4cm,
+        text width=2.8cm, right=1.0cm of raw] (clean)
+    {\textbf{preprocess.py}\\[2pt]\scriptsize Làm sạch\\Đổi tên 17 cột};
+
+  \draw[arr] (raw) -- (clean);
+
+  % Fork
+  \node[card=tealAccent, minimum width=3.0cm, minimum height=1.4cm,
+        text width=2.8cm, above right=0.4cm and 1.0cm of clean] (neo_ingest)
+    {\textbf{build\_graph.py}\\[2pt]\scriptsize CSV $\to$ Neo4j\\UNWIND batch};
+
+  \node[card=tealAccent, minimum width=3.0cm, minimum height=1.4cm,
+        text width=2.8cm, below right=0.4cm and 1.0cm of clean] (vec_ingest)
+    {\textbf{indexing\_service}\\[2pt]\scriptsize CSV $\to$ văn bản\\BGE-M3 nhúng};
+
+  \draw[arr] (clean.east) -- ++(0.5,0) |- (neo_ingest.west);
+  \draw[arr] (clean.east) -- ++(0.5,0) |- (vec_ingest.west);
+
+  % Storage
+  \node[card=warnOrange, minimum width=2.8cm, minimum height=1.4cm,
+        text width=2.6cm, right=1.0cm of neo_ingest] (neo_db)
+    {\textbf{Neo4j AuraDB}\\[2pt]\scriptsize :Disease :Symptom\\:Medicine...};
+
+  \node[card=warnOrange, minimum width=2.8cm, minimum height=1.4cm,
+        text width=2.6cm, right=1.0cm of vec_ingest] (qd_db)
+    {\textbf{Qdrant Cloud}\\[2pt]\scriptsize 3 collections\\vector 1024d};
+
+  \draw[arr, color=warnOrange] (neo_ingest) -- (neo_db);
+  \draw[arr, color=warnOrange] (vec_ingest) -- (qd_db);
+
+  % Note về LightRAG
+  \node[font=\scriptsize, color=grayText, align=center, below=0.5cm of vec_ingest]
+    {+ ingest\_to\_neo4j.py: đồng bộ LightRAG :base entities → Neo4j};
+\end{tikzpicture}
+\end{adjustbox}
+\end{center}
+\end{frame}
+
+% ── DIAGRAM 6: Graph Schema ───────────────────────────────────
+\begin{frame}{Lược đồ Đồ thị --- VietMedKG}
+\begin{center}
+\begin{adjustbox}{max width=\linewidth, max height=0.75\textheight, keepaspectratio}
+\begin{tikzpicture}
+  % Disease ở giữa
+  \node[circle, draw=medBlue, fill=medBlue!20, line width=2pt,
+        minimum size=2.0cm, font=\small\bfseries, text=medBlue] (dis) at (0,0)
+    {Disease};
+
+  % 5 node xung quanh
+  \node[circle, draw=tealAccent, fill=tealAccent!15, line width=1.5pt,
+        minimum size=1.6cm, font=\scriptsize\bfseries, text=tealAccent] (sym) at (-3.5, 2.2)
+    {Symptom};
+  \node[circle, draw=tealAccent, fill=tealAccent!15, line width=1.5pt,
+        minimum size=1.6cm, font=\scriptsize\bfseries, text=tealAccent] (tre) at (3.5, 2.2)
+    {Treatment};
+  \node[circle, draw=tealAccent, fill=tealAccent!15, line width=1.5pt,
+        minimum size=1.6cm, font=\scriptsize\bfseries, text=tealAccent] (med) at (-3.5,-2.2)
+    {Medicine};
+  \node[circle, draw=tealAccent, fill=tealAccent!15, line width=1.5pt,
+        minimum size=1.6cm, font=\scriptsize\bfseries, text=tealAccent] (adv) at (3.5,-2.2)
+    {Advice};
+  \node[circle, draw=medBlue!50, fill=medBlue!8, line width=1.5pt,
+        minimum size=1.4cm, font=\scriptsize\bfseries, text=medBlue!70,
+        dashed] (d2) at (0, 3.2)
+    {Disease};
+
+  % Quan hệ
+  \draw[-Stealth, line width=1.5pt, color=medBlue]
+    (dis) -- node[above left, font=\scriptsize\color{medBlue}]{HAS\_SYMPTOM} (sym);
+  \draw[-Stealth, line width=1.5pt, color=medBlue]
+    (dis) -- node[above right, font=\scriptsize\color{medBlue}]{HAS\_TREATMENT} (tre);
+  \draw[-Stealth, line width=1.5pt, color=medBlue]
+    (dis) -- node[below left, font=\scriptsize\color{medBlue}]{IS\_PRESCRIBED} (med);
+  \draw[-Stealth, line width=1.5pt, color=medBlue]
+    (dis) -- node[below right, font=\scriptsize\color{medBlue}]{HAS\_ADVICE} (adv);
+  \draw[-Stealth, line width=1.5pt, color=medBlue!50, dashed]
+    (dis) -- node[right, font=\scriptsize\color{medBlue!70}]{IS\_LINKED\_WITH} (d2);
+\end{tikzpicture}
+\end{adjustbox}
+\end{center}
+\end{frame}
+
+%==============================================================
+\section{5. Chọn mô hình \& Đánh giá}
+%==============================================================
+
+\begin{frame}{Lựa chọn Mô hình}
+  \begin{columns}[t]
+    \begin{column}{0.50\textwidth}
+      \textbf{LLM --- Qwen2.5 (14B / 7B / 3B):}
+      \begin{itemize}
+        \scriptsize
+        \item Phục vụ: Ollama (tương thích OpenAI)
+        \item Giao tiếp: \texttt{AsyncOpenAI}\\
+          (\texttt{base\_url=localhost:11434/v1})
+        \item Nhiệt độ: 0.0 (intent), 0.1 (tổng hợp)
+        \item Lý do: Hỗ trợ tiếng Việt, chạy cục bộ
+      \end{itemize}
+      \vspace{0.5em}
+      \textbf{Nhúng vector --- BGE-M3:}
+      \begin{itemize}
+        \scriptsize
+        \item Mô hình: \texttt{BAAI/bge-m3}
+        \item Số chiều: \textbf{1024}
+        \item Token tối đa: 8192
+        \item Đa ngôn ngữ: 100+ ngôn ngữ
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{So sánh hai đường}
+        \scriptsize
+        \begin{tabular}{lcc}
+          \toprule
+          & \textbf{Cypher} & \textbf{LightRAG}\\
+          \midrule
+          Độ chính xác & \textcolor{successGreen}{Cao}     & \textcolor{warnOrange}{TB} \\
+          Tốc độ       & \textcolor{successGreen}{5--20s}  & \textcolor{warnOrange}{30--70s} \\
+          Phạm vi      & \textcolor{warnOrange}{Lược đồ}  & \textcolor{successGreen}{Rộng} \\
+          Bảo trì      & \textcolor{warnOrange}{Thủ công} & \textcolor{successGreen}{Tự động} \\
+          \bottomrule
+        \end{tabular}
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+
+
+%==============================================================
+\section{6. Triển khai}
+%==============================================================
+
+\begin{frame}{Kiến trúc Triển khai}
+  \begin{columns}[t]
+    \begin{column}{0.54\textwidth}
+      \begin{tabular}{ll}
+        \toprule
+        \textbf{Thành phần} & \textbf{Nền tảng}\\
+        \midrule
+        Backend API  & Cục bộ / Docker\\
+                     & FastAPI cổng 8000\\
+        Frontend     & Vite dev server\\
+                     & cổng 5173\\
+        LLM + Embed  & Ollama (cục bộ)\\
+                     & Qwen2.5 + BGE-M3\\
+        Neo4j        & Neo4j AuraDB (đám mây)\\
+        Qdrant       & Qdrant Cloud\\
+        \bottomrule
+      \end{tabular}
+      \vspace{0.5em}
+      \textbf{Độ trễ:}\\
+      \quad Template Cypher: $\sim$5 giây\\
+      \quad LightRAG mix lạnh: $\sim$70 giây
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \begin{block}{Hỗ trợ Docker}
+        \scriptsize
+        \texttt{FROM python:3.11-slim}\\
+        \texttt{... cài gói, copy code}\\
+        \texttt{HEALTHCHECK ...}\\
+        \texttt{CMD ["uvicorn", ...]}
+      \end{block}
+      \vspace{0.5em}
+      \begin{block}{Tính năng Frontend}
+        \scriptsize
+        React + TypeScript + Vite\\
+        Chỉ số sức khỏe (online/offline)\\
+        Render Markdown\\
+        Kiểu cảnh báo khẩn cấp\\
+        Xử lý giới hạn tốc độ (429)
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%==============================================================
+\section{7. Agentic AI}
+%==============================================================
+
+% ── DIAGRAM 8: Agentic Reasoning Flow ────────────────────────
+\begin{frame}{Suy luận Đa bước (Multi-step Reasoning)}
+\begin{center}
+\begin{adjustbox}{max width=\linewidth, max height=0.75\textheight, keepaspectratio}
+\begin{tikzpicture}[node distance=0.85cm]
+  % Input
+  \node[bigcard=medBlue, minimum width=4.0cm] (q)
+    {Câu hỏi Người dùng};
+
+  % Intent
+  \node[bigcard=tealAccent, minimum width=4.0cm, below=0.6cm of q] (intent)
+    {LLM Trích xuất Intent\\[2pt]\scriptsize\normalfont Qwen2.5, temp=0 + Regex 50+};
+  \draw[arr] (q) -- (intent);
+
+  % Decision: Entity?
+  \node[card=medBlue, minimum width=2.8cm, minimum height=1.0cm,
+        below=0.6cm of intent] (dec1)
+    {\scriptsize Tìm thấy Entity?};
+  \draw[arr] (intent) -- (dec1);
+
+  % YES: Neo4j lookup
+  \node[card=warnOrange, minimum width=3.2cm, minimum height=1.1cm,
+        text width=3.0cm, right=1.4cm of dec1] (neo)
+    {\textbf{Neo4j Lookup}\\[2pt]\scriptsize Fuzzy CONTAINS\\Cypher template};
+  \draw[arr, color=warnOrange]
+    (dec1.east) -- node[above, font=\scriptsize]{CÓ} (neo.west);
+
+  % NO: LightRAG
+  \node[card=tealAccent, minimum width=3.2cm, minimum height=1.1cm,
+        text width=3.0cm, left=1.4cm of dec1] (lr)
+    {\textbf{LightRAG mix}\\[2pt]\scriptsize Qdrant vector\\+ Neo4j :base graph};
+  \draw[arrteal]
+    (dec1.west) -- node[above, font=\scriptsize]{KHÔNG} (lr.east);
+
+  % Synthesize
+  \node[bigcard=purpleNode, minimum width=4.0cm, below=0.8cm of dec1] (syn)
+    {Qwen2.5 Tổng hợp};
+  \draw[arr, color=purpleNode] (neo.south) |- (syn.east);
+  \draw[arr, color=purpleNode] (lr.south) |- (syn.west);
+  \draw[arr, color=purpleNode] (dec1.south) -- (syn.north);
+
+  % Output
+  \node[card=successGreen, minimum width=4.0cm, minimum height=0.9cm,
+        below=0.6cm of syn] (out)
+    {\scriptsize Phản hồi có cấu trúc + Disclaimer};
+  \draw[arrgreen] (syn) -- (out);
+\end{tikzpicture}
+\end{adjustbox}
+\end{center}
+\end{frame}
+
+\begin{frame}{Công cụ \& Ví dụ Quyết định của Agent}
+  \begin{columns}[t]
+    \begin{column}{0.50\textwidth}
+      \textbf{4 công cụ chính:}
+      \begin{enumerate}
+        \scriptsize
+        \item \textbf{Neo4j} --- Truy vấn đồ thị có cấu trúc
+        \item \textbf{Qdrant} --- Tìm kiếm vector ngữ nghĩa
+        \item \textbf{LLM (Qwen2.5)} --- Phân loại intent \& Tổng hợp
+        \item \textbf{BGE-M3} --- Nhúng vector câu hỏi
+      \end{enumerate}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{exampleblock}{Demo: Vết Quyết định}
+        \scriptsize
+        \textbf{Input:} ``Thuốc Metformin chữa bệnh gì?''\\[3pt]
+        Bước 1: LLM $\to$ \texttt{\{find\_by\_medicine,}\\
+        \quad\texttt{Metformin\}}\\[2pt]
+        Bước 2: $\in$ FIND\_BY\_TYPES\\
+        $\to$ bỏ qua định danh\\[2pt]
+        Bước 3: Cypher CONTAINS\\
+        \texttt{toLower('Metformin')}\\[2pt]
+        Bước 4: Neo4j $\to$ 2 bản ghi\\[2pt]
+        Bước 5: LLM tổng hợp\\
+        $\to$ \texttt{response\_type="table"}\\
+        \textbf{Không có disclaimer} (tra cứu ngược)
+      \end{exampleblock}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%==============================================================
+\section{8. Học liên tục \& Giám sát}
+%==============================================================
+
+\begin{frame}{Giám sát \& Học liên tục}
+  \begin{columns}[t]
+    \begin{column}{0.50\textwidth}
+      \textbf{Chỉ số đã triển khai:}
+      \begin{itemize}
+        \scriptsize
+        \item Thời gian thực thi (ms) trong metadata
+        \item Engine đã dùng: \texttt{cypher\_direct / lightrag}
+        \item Chế độ truy vấn: \texttt{cypher:template:symptoms}
+        \item Nhật ký quyết định định tuyến
+        \item Mã lỗi: TIMEOUT, DATABASE\_ERROR, ...
+      \end{itemize}
+      \vspace{0.4em}
+      \textbf{Endpoint sức khỏe (\texttt{GET /health}):}
+      \begin{itemize}
+        \scriptsize
+        \item[\textcolor{successGreen}{\checkmark}] Cơ sở dữ liệu (Neo4j)
+        \item[\textcolor{successGreen}{\checkmark}] Máy chủ LLM (kiểm tra ``Say ok'')
+        \item[\textcolor{successGreen}{\checkmark}] Nhúng vector (shape [1,1024])
+        \item[\textcolor{successGreen}{\checkmark}] LightRAG (trạng thái khởi tạo)
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Chiến lược Học liên tục}
+        \scriptsize
+        \textbf{Thêm dữ liệu mới:}\\
+        1. Thêm bệnh vào CSV\\
+        2. Chạy pipeline ETL\\
+        3. Nạp lại Neo4j + Qdrant\\
+        \textit{(không cần huấn luyện lại model)}\\[4pt]
+        \textbf{Theo dõi hiệu suất:}\\
+        Benchmark tạo báo cáo có dấu thời gian\\
+        $\to$ So sánh qua các phiên bản\\[4pt]
+        \textbf{Phát hiện Cache cũ:}\\
+        \texttt{\_clear\_stale\_llm\_cache()}: xóa\\
+        cache tiếng Anh khi đổi sang tiếng Việt
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%==============================================================
+\section{9. Bảo mật \& Độ bền}
+%==============================================================
+
+% ── DIAGRAM 9: Defense-in-Depth ──────────────────────────────
+\begin{frame}{Phòng thủ theo chiều sâu --- 4 Lớp Bảo vệ}
+\begin{center}
+\begin{adjustbox}{max width=\linewidth, max height=0.75\textheight, keepaspectratio}
+\begin{tikzpicture}
+  % Lớp 4 (ngoài cùng)
+  \node[rectangle, rounded corners=10pt,
+        draw=medBlue!30, line width=1.4pt, fill=medBlue!6,
+        minimum width=12.5cm, minimum height=5.0cm] (L1) at (0,0) {};
+  \node[font=\footnotesize\bfseries, color=medBlue!60,
+        anchor=north west] at (L1.north west) [xshift=6pt, yshift=-6pt]
+    {Lớp 1 --- Kiểm tra Cypher: chặn DELETE / DROP / CREATE / SET / MERGE};
+
+  % Lớp 3
+  \node[rectangle, rounded corners=8pt,
+        draw=medBlue!50, line width=1.4pt, fill=medBlue!10,
+        minimum width=10.0cm, minimum height=3.8cm] (L2) at (0,-0.3) {};
+  \node[font=\footnotesize\bfseries, color=medBlue!70,
+        anchor=north west] at (L2.north west) [xshift=6pt, yshift=-6pt]
+    {Lớp 2 --- Khử trùng Cypher: lưới an toàn cuối trước Neo4j};
+
+  % Lớp 2
+  \node[rectangle, rounded corners=6pt,
+        draw=medBlue!70, line width=1.4pt, fill=medBlue!16,
+        minimum width=7.5cm, minimum height=2.6cm] (L3) at (0,-0.6) {};
+  \node[font=\footnotesize\bfseries, color=medBlue!80,
+        anchor=north west] at (L3.north west) [xshift=6pt, yshift=-6pt]
+    {Lớp 3 --- Rate Limit: 30 req/phút/IP, cửa sổ trượt 60s};
+
+  % Lớp 1 (trong cùng)
+  \node[rectangle, rounded corners=5pt,
+        draw=medBlue, line width=1.6pt, fill=medBlue!25,
+        minimum width=5.0cm, minimum height=1.4cm] (L4) at (0,-0.9) {};
+  \node[font=\footnotesize\bfseries, color=medBlue,
+        anchor=north west] at (L4.north west) [xshift=6pt, yshift=-6pt]
+    {Lớp 4 --- Timeout: 120s toàn cục};
+
+  % Neo4j ở trung tâm
+  \node[circle, fill=medBlue, text=white,
+        minimum size=1.5cm, font=\small\bfseries] at (0,-1.1)
+    {Neo4j};
+\end{tikzpicture}
+\end{adjustbox}
+\end{center}
+\end{frame}
+
+\begin{frame}{Độ bền \& Phát hiện Tình huống Khẩn cấp}
+  \begin{columns}[t]
+    \begin{column}{0.52\textwidth}
+      \textbf{Xử lý đầu vào bất thường:}
+      \begin{center}
+      \scriptsize
+      \begin{tabular}{lll}
+        \toprule
+        \textbf{Đầu vào} & \textbf{Xử lý} & \textbf{Test}\\
+        \midrule
+        Không dấu TV & LLM nhận ra & \textcolor{successGreen}{\checkmark}\\
+        Viết hoa hết & \texttt{toLower()} & \textcolor{successGreen}{\checkmark}\\
+        Viết tắt tiếng Anh & LightRAG & \textcolor{successGreen}{\checkmark}\\
+        Dấu chấm hỏi thừa & Regex strip & \textcolor{successGreen}{\checkmark}\\
+        Từ lịch sự ``ạ'' & Bỏ qua hậu tố & \textcolor{successGreen}{\checkmark}\\
+        Quá ngắn (``viêm'') & Timeout & \textcolor{warnOrange}{$\sim$}\\
+        Câu hỏi rỗng & 400 Bad Request & \textcolor{successGreen}{\checkmark}\\
+        \bottomrule
+      \end{tabular}
+      \end{center}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \begin{alertblock}{Phát hiện Khẩn cấp (2 lớp)}
+        \scriptsize
+        \textbf{Lớp 1:} Regex \texttt{intent\_classifier}:\\
+        co giật, bất tỉnh, ngộ độc,\\
+        ngừng thở, chảy máu không cầm...\\[4pt]
+        \textbf{Lớp 2:} \texttt{EMERGENCY\_QUESTION\_KEYWORDS}\\
+        Quét câu HỎI (không quét câu trả lời)\\[4pt]
+        \textbf{Kết quả:}\\
+        \texttt{response\_type = "warning"}\\
+        + CTA: ``\textbf{GỌI CẤP CỨU NGAY (115)}''
+      \end{alertblock}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%==============================================================
+\section{10. Quản lý dự án}
+%==============================================================
+
+\begin{frame}{Tài liệu \& Chất lượng Code}
+  \begin{columns}[t]
+    \begin{column}{0.55\textwidth}
+      \textbf{15+ Tài liệu Thiết kế (docs/):}
+      \begin{enumerate}
+        \scriptsize
+        \item Tổng quan Dự án
+        \item Kiến trúc Hệ thống
+        \item Pipeline Dữ liệu \& Lược đồ
+        \item Chiến lược Mô hình AI
+        \item Thiết kế API
+        \item Kiến trúc UI/UX Client
+        \item Thiết kế Agentic AI \& Phân công
+        \item Kế hoạch Sprint \& Học liên tục
+        \item Đạo đức \& AI có Trách nhiệm
+        \item Quản lý Dự án
+        \item Hạ tầng Phát triển
+        \item Quy trình \& Quy tắc Git
+        \item Thiết kế Lược đồ Đồ thị
+      \end{enumerate}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \textbf{Chất lượng Code:}
+      \begin{itemize}
+        \scriptsize
+        \item \textbf{Mô-đun hóa:}\\
+          ai\_engine / backend / frontend / etl
+        \item \textbf{Docstrings:}\\
+          Đầy đủ cho mọi file, hàm, class
+        \item \textbf{Type hints:}\\
+          Python 3.11+ xuyên suốt
+        \item \textbf{Lint:}\\
+          Ruff (line-length=100, PEP8)
+        \item \textbf{Cấu hình tập trung:}\\
+          .env + config.py\\
+          (kiểm tra lúc khởi động)
+        \item \textbf{Không hard-code bí mật}
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%==============================================================
+\section{11. Đạo đức \& AI có trách nhiệm}
+%==============================================================
+
+\begin{frame}{Phân tích Bên liên quan}
+  \begin{center}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Bên liên quan} & \textbf{Lợi ích} & \textbf{Rủi ro}\\
+    \midrule
+    Người dân & Tra cứu y tế nhanh, miễn phí & Tự chẩn đoán sai\\
+    Sinh viên y & Học tập, tra cứu kiến thức & Phụ thuộc quá mức AI\\
+    Bác sĩ & Công cụ hỗ trợ tra cứu & Bệnh nhân mang thông tin sai\\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+  \vspace{0.5em}
+  \begin{columns}[t]
+    \begin{column}{0.48\textwidth}
+      \textbf{Thiên lệch \& Công bằng:}
+      \begin{itemize}
+        \scriptsize
+        \item Thiên lệch dữ liệu: VietMedKG từ web\\
+          $\to$ nghiêng về bệnh phổ biến
+        \item Thiên lệch ngôn ngữ: chủ yếu tiếng Việt
+        \item Giảm thiểu: ưu tiên CYPHER path\\
+          (ít ảo giác hơn LightRAG)
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \textbf{Khả năng Giải thích:}
+      \begin{itemize}
+        \scriptsize
+        \item Metadata trong mỗi phản hồi:\\
+          engine, query\_mode, cypher query,\\
+          thời gian thực thi
+        \item Frontend hiển thị:\\
+          engine + thời gian + số nguồn
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Tuyên bố Y tế \& AI có Trách nhiệm}
+  \begin{block}{Các biện pháp trách nhiệm đạo đức}
+    \begin{itemize}
+      \item \textbf{Tuyên bố y tế tự động} cho các truy vấn tư vấn sức khỏe:\\
+        \textit{``Thông tin mang tính chất tham khảo. Vui lòng tham khảo ý kiến bác sĩ chuyên khoa để có chẩn đoán chính xác.''}
+        \vspace{4pt}
+      \item \textbf{Không đề xuất liều lượng thuốc cụ thể}\\
+        (áp dụng trong system prompt của LightRAG)
+        \vspace{4pt}
+      \item \textbf{Hành động kêu gọi khẩn cấp} khi phát hiện triệu chứng nguy hiểm
+        \vspace{4pt}
+      \item \textbf{Giới hạn tốc độ} --- chống spam 30 yêu cầu/phút/IP
+        \vspace{4pt}
+      \item \textbf{Xác thực đầu vào} --- tối đa 1000 ký tự, Pydantic validation
+    \end{itemize}
+  \end{block}
+\end{frame}
+
+%==============================================================
+\section{Demo Live}
+%==============================================================
+
+\begin{frame}{Gợi ý Demo Trực tiếp}
+  \begin{columns}[t]
+    \begin{column}{0.50\textwidth}
+      \begin{enumerate}
+        \small
+        \item \textbf{Truy vấn Forward}\\
+          \textit{``Bệnh tiểu đường có triệu chứng gì?''}\\
+          \textcolor{successGreen}{$\to$ cypher:template:symptoms}
+        \vspace{3pt}
+        \item \textbf{Truy vấn Ngược}\\
+          \textit{``Thuốc Metformin chữa bệnh gì?''}\\
+          \textcolor{successGreen}{$\to$ cypher:template:find\_by\_medicine}
+        \vspace{3pt}
+        \item \textbf{LightRAG Ngữ nghĩa}\\
+          \textit{``Tại sao phụ nữ sau sinh hay thiếu máu?''}\\
+          \textcolor{tealAccent}{$\to$ lightrag / chế độ mix}
+        \vspace{3pt}
+        \item \textbf{Khẩn cấp}\\
+          \textit{``Tôi bị sốt cao 40 độ, co giật''}\\
+          \textcolor{warnOrange}{$\to$ response\_type=warning}
+      \end{enumerate}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{enumerate}
+        \setcounter{enumi}{4}
+        \small
+        \item \textbf{Định danh mơ hồ}\\
+          \textit{``Cho tôi biết về bệnh hen suyễn''}\\
+          \textcolor{medBlue}{$\to$ 28 kết quả $\to$ hỏi lại}
+        \vspace{3pt}
+        \item \textbf{Kiểm tra Sức khỏe}\\
+          \texttt{GET /api/v1/health}\\
+          \textcolor{successGreen}{$\to$ trạng thái 4 dịch vụ}
+        \vspace{3pt}
+        \item \textbf{Xem Lược đồ}\\
+          \texttt{GET /api/v1/schema}\\
+          \textcolor{medBlue}{$\to$ số node + quan hệ}
+      \end{enumerate}
+      \vspace{0.5em}
+      \begin{exampleblock}{Mẹo}
+        \scriptsize
+        Mở Swagger UI tại\\
+        \texttt{http://localhost:8000/docs}\\
+        để demo API tương tác
+      \end{exampleblock}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%==============================================================
+\section{Kết luận}
+%==============================================================
+
+\begin{frame}{Tóm tắt --- Yêu cầu và Triển khai}
+  \scriptsize
+  \begin{center}
+  \begin{tabular}{clll}
+    \toprule
+    \textbf{\#} & \textbf{Yêu cầu} & \textbf{Trạng thái} & \textbf{Bằng chứng}\\
+    \midrule
+    1  & Bài toán thực tế      & \textcolor{successGreen}{\checkmark} & Medical KBQA tiếng Việt\\
+    2  & Giải pháp NLP         & \textcolor{successGreen}{\checkmark} & Hybrid Dual-Path (Cypher + LightRAG)\\
+    3  & Kiến trúc hệ thống    & \textcolor{successGreen}{\checkmark} & FastAPI + Neo4j + Qdrant + Ollama + React\\
+    4  & Quản lý dữ liệu       & \textcolor{successGreen}{\checkmark} & VietMedKG CSV $\to$ ETL $\to$ Neo4j + Qdrant\\
+    5  & Chọn mô hình          & \textcolor{successGreen}{\checkmark} & Qwen2.5 + BGE-M3, benchmark 45 câu\\
+    6  & Triển khai            & \textcolor{successGreen}{\checkmark} & REST API + Web Demo + Docker\\
+    7  & Agentic AI            & \textcolor{successGreen}{\checkmark} & Định tuyến đa bước, sử dụng công cụ\\
+    8  & Học liên tục          & \textcolor{warnOrange}{$\sim$} & Giám sát sức khỏe, cache, benchmark\\
+    9  & Bảo mật \& Độ bền     & \textcolor{successGreen}{\checkmark} & Validator + sanitizer + rate limit + khẩn cấp\\
+    10 & Quản lý dự án         & \textcolor{successGreen}{\checkmark} & 15 tài liệu, code mô-đun, Git workflow\\
+    11 & Đạo đức               & \textcolor{successGreen}{\checkmark} & Disclaimer, không liều lượng, CTA khẩn cấp\\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+\end{frame}
+
+\begin{frame}{Kết luận \& Hướng Phát triển}
+  \begin{columns}[t]
+    \begin{column}{0.50\textwidth}
+      \textbf{Đã đạt được:}
+      \begin{itemize}
+        \scriptsize
+        \item[\textcolor{successGreen}{\checkmark}] Kiến trúc Hybrid Dual-Path hoàn chỉnh
+        \item[\textcolor{successGreen}{\checkmark}] 15 mẫu Cypher cho VietMedKG
+        \item[\textcolor{successGreen}{\checkmark}] LightRAG mix mode (Neo4j :base + Qdrant)
+        \item[\textcolor{successGreen}{\checkmark}] An toàn: Validator + Sanitizer + Rate Limit
+        \item[\textcolor{successGreen}{\checkmark}] Phát hiện khẩn cấp 2 lớp
+        \item[\textcolor{successGreen}{\checkmark}] Benchmark 45 câu (51\% đạt, 96\% không crash)
+        \item[\textcolor{successGreen}{\checkmark}] Giao diện chat React + FastAPI + Docker
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \textbf{Hướng Phát triển:}
+      \begin{itemize}
+        \scriptsize
+        \item Từ điển alias cho định danh entity
+        \item Fine-tune bộ phân loại intent
+        \item Cache truy vấn để tăng tốc độ
+        \item Lịch sử hội thoại (multi-turn)
+        \item Pipeline CI/CD tự động benchmark
+        \item Vòng lặp thu thập phản hồi người dùng
+      \end{itemize}
+      \vspace{0.8em}
+      \begin{center}
+        \Large\textbf{Cảm ơn thầy đã lắng nghe!}\\[0.5em]
+        \normalsize Nhóm AegisHealth\\
+        \scriptsize\textcolor{grayText}{Tháng 6, 2026}
+      \end{center}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%==============================================================
+\appendix
+%==============================================================
+
+\begin{frame}[fragile,noframenumbering]{Phụ lục: Mẫu Cypher --- triệu chứng}
+\begin{lstlisting}[language=SQL]
+MATCH (d:Disease)
+WHERE CASE
+  WHEN toLower(d.disease_name) = toLower($name) THEN true
+  WHEN toLower(d.disease_name) = toLower('benh '+$name) THEN true
+  WHEN toLower(d.disease_name) STARTS WITH toLower($name) THEN true
+  ELSE toLower(d.disease_name) CONTAINS toLower($name)
+END
+OPTIONAL MATCH (d)-[:HAS_SYMPTOM]->(s:Symptom)
+RETURN d.disease_name AS disease_name,
+       s.disease_symptom AS disease_symptom,
+       s.people_easy_get  AS people_easy_get,
+       s.check_method     AS check_method
+LIMIT $limit
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile,noframenumbering]{Phụ lục: Metadata Phản hồi}
+\begin{lstlisting}[language=Python]
+{
+  "status": "success",
+  "response_type": "table",
+  "answer": "Benh tieu duong co cac trieu chung...",
+  "data": [
+    {"disease_name": "Benh tieu duong",
+     "disease_symptom": "Khat nuoc, tieu nhieu..."}
+  ],
+  "metadata": {
+    "query_mode": "cypher:template:symptoms",
+    "execution_time_ms": 12345.6,
+    "source_count": 3,
+    "engine": "cypher_direct",
+    "cypher": "MATCH (d:Disease) WHERE ..."
+  }
+}
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[noframenumbering]{Phụ lục: Các Nhóm Benchmark}
+  \scriptsize
+  \begin{center}
+  \begin{tabular}{cll}
+    \toprule
+    \textbf{Nhóm} & \textbf{Mô tả} & \textbf{Ví dụ}\\
+    \midrule
+    A & Forward CYPHER (9 câu) & ``Triệu chứng tiểu đường là gì?''\\
+    B & Reverse CYPHER (5 câu) & ``Thuốc aspirin trị bệnh gì?''\\
+    C & LightRAG ngữ nghĩa (6 câu) & ``Type 1 và type 2 khác gì nhau?''\\
+    D & Adversarial (8 câu) & Thử tấn công, đầu vào biên giới\\
+    E & Trường hợp đặc biệt (7 câu) & Không dấu, viết hoa, viết tắt\\
+    F & Chất lượng câu trả lời (5 câu) & Kiểm tra nội dung phản hồi\\
+    G & Logic Disclaimer (5 câu) & Có/không disclaimer đúng logic\\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+\end{frame}
+
+\end{document}
