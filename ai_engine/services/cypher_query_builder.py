@@ -1,411 +1,547 @@
-"""Cypher Query Builder — Generate Cypher for direct Neo4j VietMedKG lookups.
+"""Cypher Query Builder — Template library cho VietMedKG.
 
-Part of Phương án C (Hybrid): When the Query Router determines that a
-question is a precise entity lookup, this module generates the exact
-Cypher query based on the VietMedKG schema (docs/13_GRAPH_SCHEMA_DESIGN.md).
+Cung cấp pre-validated Cypher templates cho các query type phổ biến.
+Được gọi TRƯỚC khi dùng LLM Text2Cypher.
 
-Schema Reference:
-    Nodes: Disease, Symptom, Treatment, Medicine, Advice
-    Relationships: HAS_SYMPTOM, HAS_TREATMENT, IS_PRESCRIBED, HAS_ADVICE, IS_LINKED_WITH
-    Key: Disease.disease_name (UNIQUE, Capitalize format)
+Ghi chú schema (đã kiểm tra trực tiếp trên Neo4j):
+- Mỗi Disease có đúng 1 Symptom node (UNIQUE constraint trên Symptom.disease_name).
+  Triệu chứng lưu dạng blob string trong disease_symptom, không phải individual nodes.
+  Pattern shared-symptom (d1)-[:HAS_SYMPTOM]->(s)<-[:HAS_SYMPTOM]-(d2) không hoạt động.
+- 38% Advice nodes chỉ có disease_prevention, không có nutrition fields.
+- Matching ưu tiên exact → prefixed-exact → starts-with → contains (tiered matching).
 """
 
 import logging
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_LIMIT = 5
+_LINKED_LIMIT = 10
+_FIND_BY_SYMPTOM_LIMIT = 10
 
-def build_cypher_query(query_type: str, disease_name: str | None = None) -> tuple[str, dict]:
-    """Build a Cypher query based on the query type and disease name.
+# Tiered CASE expression for fuzzy entity matching.
+# Score 0 = exact, 1 = "bệnh " + exact, 2 = starts-with, 3 = general contains.
+_TIER = """\
+CASE
+  WHEN toLower(d.disease_name) = toLower($name)               THEN 0
+  WHEN toLower(d.disease_name) = 'bệnh ' + toLower($name)    THEN 1
+  WHEN toLower(d.disease_name) STARTS WITH toLower($name)     THEN 2
+  ELSE 3
+END"""
+
+
+def build_cypher_query(
+    query_type: str,
+    entity: str | None = None,
+    extra: str | None = None,
+    exact: bool = False,
+) -> tuple[str, dict] | tuple[None, None]:
+    """Trả về (cypher_string, params) cho query_type đã biết, hoặc (None, None) nếu không khớp.
 
     Args:
-        query_type: Type of query — one of:
-            symptoms, medicine, treatment, advice, prevention,
-            department, profile, count, linked_diseases
-        disease_name: The disease name to look up (if applicable).
-
-    Returns:
-        Tuple of (cypher_query_string, parameters_dict).
+        exact: When True, use equality match (d.disease_name = $name) instead of CONTAINS.
+               Set to True when entity is a canonical name returned by disambiguation.
     """
-    if disease_name:
-        # Normalize: capitalize only the first letter to match DB convention
-        disease_name = disease_name.strip().capitalize()
-
     builders = {
-        "symptoms": _build_symptoms_query,
-        "medicine": _build_medicine_query,
-        "treatment": _build_treatment_query,
-        "advice": _build_advice_query,
-        "prevention": _build_prevention_query,
-        "department": _build_department_query,
-        "profile": _build_profile_query,
-        "linked_diseases": _build_linked_diseases_query,
-        "count": _build_count_query,
+        "symptoms":              _tmpl_symptoms,
+        "medicine":              _tmpl_medicine,
+        "treatment":             _tmpl_treatment,
+        "advice":                _tmpl_advice,
+        "prevention":            _tmpl_prevention,
+        "department":            _tmpl_department,
+        "profile":               _tmpl_profile,
+        "linked_diseases":       _tmpl_linked_diseases,
+        "count":                 _tmpl_count,
+        "count_by_type":         _tmpl_count_by_type,
+        "find_by_symptom":       _tmpl_find_by_symptom,
+        "find_by_medicine":      _tmpl_find_by_medicine,
+        "find_by_nutrition_avoid": _tmpl_find_by_nutrition_avoid,
+        "find_by_nutrition_eat": _tmpl_find_by_nutrition_eat,
+        "find_by_prevention":    _tmpl_find_by_prevention,
+        "linked_with_info":      _tmpl_linked_with_info,
+        "compare_diseases":      _tmpl_compare_diseases,
     }
 
-    builder = builders.get(query_type, _build_profile_query)
-    cypher, params = builder(disease_name)
+    builder = builders.get(query_type)
+    if not builder:
+        logger.warning("Unknown query_type '%s' — no template available", query_type)
+        return None, None
 
+    cypher, params = builder(entity, extra, exact)
     logger.info(
-        "Cypher built (type=%s, disease='%s'): %s",
-        query_type,
-        disease_name,
-        cypher[:120],
+        "Template selected: type=%s entity='%s' cypher='%s'",
+        query_type, entity, cypher.strip()[:100],
     )
-
     return cypher, params
 
 
-def _build_symptoms_query(disease_name: str | None) -> tuple[str, dict]:
-    """Query: What are the symptoms of disease X?"""
-    if not disease_name:
-        return "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) RETURN d.disease_name, s.disease_symptom LIMIT 50", {}
+# ── Templates ──────────────────────────────────────────────────────────────
 
+def _where_filter(alias: str, exact: bool) -> str:
+    """Return the WHERE + optional tiered-sort clause for an entity-based template."""
+    if exact:
+        return f"WHERE {alias}.disease_name = $name\n        "
     return (
-        """
-        MATCH (d:Disease {disease_name: $name})-[:HAS_SYMPTOM]->(s:Symptom)
-        RETURN s.disease_symptom AS symptoms, s.check_method AS check
-        """,
-        {"name": disease_name},
+        f"WHERE toLower({alias}.disease_name) CONTAINS toLower($name)\n"
+        f"        WITH {alias}, s,\n"
+        f"             CASE\n"
+        f"               WHEN toLower({alias}.disease_name) = toLower($name)               THEN 0\n"
+        f"               WHEN toLower({alias}.disease_name) = 'bệnh ' + toLower($name)    THEN 1\n"
+        f"               WHEN toLower({alias}.disease_name) STARTS WITH toLower($name)     THEN 2\n"
+        f"               ELSE 3\n"
+        f"             END AS match_score\n"
+        f"        ORDER BY match_score, {alias}.disease_name\n"
+        f"        "
     )
 
 
-def _build_medicine_query(disease_name: str | None) -> tuple[str, dict]:
-    """Query: What medicine treats disease X?"""
-    if not disease_name:
-        return "MATCH (d:Disease)-[:IS_PRESCRIBED]->(m:Medicine) RETURN d.disease_name, m.drug_common LIMIT 50", {}
-
+def _where_filter_single(alias: str, exact: bool) -> str:
+    """Same as _where_filter but without the s variable in WITH (for single-node MATCH)."""
+    if exact:
+        return f"WHERE {alias}.disease_name = $name\n        "
     return (
-        """
-        MATCH (d:Disease {disease_name: $name})-[:IS_PRESCRIBED]->(m:Medicine)
-        RETURN d.disease_name AS disease,
-               m.drug_recommend AS recommended_drugs,
-               m.drug_common AS common_drugs,
-               m.drug_detail AS drug_details
-        """,
-        {"name": disease_name},
+        f"WHERE toLower({alias}.disease_name) CONTAINS toLower($name)\n"
+        f"        WITH {alias},\n"
+        f"             CASE\n"
+        f"               WHEN toLower({alias}.disease_name) = toLower($name)               THEN 0\n"
+        f"               WHEN toLower({alias}.disease_name) = 'bệnh ' + toLower($name)    THEN 1\n"
+        f"               WHEN toLower({alias}.disease_name) STARTS WITH toLower($name)     THEN 2\n"
+        f"               ELSE 3\n"
+        f"             END AS match_score\n"
+        f"        ORDER BY match_score, {alias}.disease_name\n"
+        f"        "
     )
 
 
-def _build_treatment_query(disease_name: str | None) -> tuple[str, dict]:
-    """Query: How to treat disease X?"""
-    if not disease_name:
-        return "MATCH (d:Disease)-[:HAS_TREATMENT]->(t:Treatment) RETURN d.disease_name, t.cure_method LIMIT 50", {}
-
+def _where_filter_join(alias: str, join_var: str, exact: bool) -> str:
+    """WHERE + tiered sort for MATCH with a join variable (not s)."""
+    if exact:
+        return f"WHERE {alias}.disease_name = $name\n        "
     return (
-        """
-        MATCH (d:Disease {disease_name: $name})-[:HAS_TREATMENT]->(t:Treatment)
-        RETURN d.disease_name AS disease,
-               t.cure_method AS treatment_method,
-               t.cure_department AS department,
-               t.cure_probability AS cure_rate
-        """,
-        {"name": disease_name},
+        f"WHERE toLower({alias}.disease_name) CONTAINS toLower($name)\n"
+        f"        WITH {alias}, {join_var},\n"
+        f"             CASE\n"
+        f"               WHEN toLower({alias}.disease_name) = toLower($name)               THEN 0\n"
+        f"               WHEN toLower({alias}.disease_name) = 'bệnh ' + toLower($name)    THEN 1\n"
+        f"               WHEN toLower({alias}.disease_name) STARTS WITH toLower($name)     THEN 2\n"
+        f"               ELSE 3\n"
+        f"             END AS match_score\n"
+        f"        ORDER BY match_score, {alias}.disease_name\n"
+        f"        "
     )
 
 
-def _build_advice_query(disease_name: str | None) -> tuple[str, dict]:
-    """Query: What dietary advice for disease X?"""
-    if not disease_name:
-        return "MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice) RETURN d.disease_name, a.nutrition_do_eat LIMIT 50", {}
-
+def _tmpl_symptoms(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) "
+            "RETURN d.disease_name AS disease, s.disease_symptom AS symptoms "
+            f"LIMIT {_DEFAULT_LIMIT}",
+            {},
+        )
+    wf = _where_filter("d", exact)
     return (
-        """
-        MATCH (d:Disease {disease_name: $name})-[:HAS_ADVICE]->(a:Advice)
-        RETURN d.disease_name AS disease,
-               a.nutrition_do_eat AS should_eat,
-               a.nutrition_recommend_meal AS recommended_meals,
-               a.nutrition_not_eat AS should_avoid,
-               a.disease_prevention AS prevention
+        f"""
+        MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
+        {wf}LIMIT $limit
+        RETURN d.disease_name     AS disease,
+               s.disease_symptom  AS symptoms,
+               s.check_method     AS check_method,
+               s.people_easy_get  AS risk_group
         """,
-        {"name": disease_name},
+        {"name": entity, "limit": _DEFAULT_LIMIT},
     )
 
 
-def _build_prevention_query(disease_name: str | None) -> tuple[str, dict]:
-    """Query: How to prevent disease X?"""
-    if not disease_name:
-        return "MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice) RETURN d.disease_name, a.disease_prevention LIMIT 50", {}
-
+def _tmpl_medicine(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:IS_PRESCRIBED]->(m:Medicine) "
+            "RETURN d.disease_name AS disease, m.drug_common AS common_drugs "
+            f"LIMIT {_DEFAULT_LIMIT}",
+            {},
+        )
+    wf = _where_filter_join("d", "m", exact)
     return (
-        """
-        MATCH (d:Disease {disease_name: $name})-[:HAS_ADVICE]->(a:Advice)
-        RETURN d.disease_name AS disease,
-               a.disease_prevention AS prevention
+        f"""
+        MATCH (d:Disease)-[:IS_PRESCRIBED]->(m:Medicine)
+        {wf}LIMIT $limit
+        RETURN d.disease_name    AS disease,
+               m.drug_recommend  AS recommended_drugs,
+               m.drug_common     AS common_drugs,
+               m.drug_detail     AS drug_detail
         """,
-        {"name": disease_name},
+        {"name": entity, "limit": _DEFAULT_LIMIT},
     )
 
 
-def _build_department_query(disease_name: str | None) -> tuple[str, dict]:
-    """Query: Which department treats disease X?"""
-    if not disease_name:
-        return "MATCH (d:Disease)-[:HAS_TREATMENT]->(t:Treatment) RETURN d.disease_name, t.cure_department LIMIT 50", {}
-
+def _tmpl_treatment(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_TREATMENT]->(t:Treatment) "
+            "RETURN d.disease_name AS disease, t.cure_method AS treatment_method "
+            f"LIMIT {_DEFAULT_LIMIT}",
+            {},
+        )
+    wf = _where_filter_join("d", "t", exact)
     return (
-        """
-        MATCH (d:Disease {disease_name: $name})-[:HAS_TREATMENT]->(t:Treatment)
-        RETURN d.disease_name AS disease,
-               t.cure_department AS department
+        f"""
+        MATCH (d:Disease)-[:HAS_TREATMENT]->(t:Treatment)
+        {wf}LIMIT $limit
+        RETURN d.disease_name      AS disease,
+               t.cure_method       AS treatment_method,
+               t.cure_department   AS department,
+               t.cure_probability  AS cure_rate
         """,
-        {"name": disease_name},
+        {"name": entity, "limit": _DEFAULT_LIMIT},
     )
 
 
-def _build_profile_query(disease_name: str | None) -> tuple[str, dict]:
-    """Query: Full profile of disease X."""
-    if not disease_name:
-        return "MATCH (d:Disease) RETURN d.disease_name, d.disease_description LIMIT 20", {}
-
+def _tmpl_advice(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    # 38% Advice nodes chỉ có disease_prevention — OPTIONAL MATCH không cần thiết vì
+    # đây là 1:1 relationship; NULL fields được lọc bởi formatter.
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice) "
+            "RETURN d.disease_name AS disease, "
+            "a.nutrition_do_eat AS should_eat, a.disease_prevention AS prevention "
+            f"LIMIT {_DEFAULT_LIMIT}",
+            {},
+        )
+    wf = _where_filter_join("d", "a", exact)
     return (
-        """
-        MATCH (d:Disease {disease_name: $name})
+        f"""
+        MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice)
+        {wf}LIMIT $limit
+        RETURN d.disease_name              AS disease,
+               a.nutrition_do_eat          AS should_eat,
+               a.nutrition_not_eat         AS should_avoid,
+               a.nutrition_recommend_meal  AS recommended_meals,
+               a.disease_prevention        AS prevention
+        """,
+        {"name": entity, "limit": _DEFAULT_LIMIT},
+    )
+
+
+def _tmpl_prevention(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice) "
+            "RETURN d.disease_name AS disease, a.disease_prevention AS prevention "
+            f"LIMIT {_DEFAULT_LIMIT}",
+            {},
+        )
+    wf = _where_filter_join("d", "a", exact)
+    return (
+        f"""
+        MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice)
+        {wf}LIMIT $limit
+        RETURN d.disease_name        AS disease,
+               a.disease_prevention  AS prevention
+        """,
+        {"name": entity, "limit": _DEFAULT_LIMIT},
+    )
+
+
+def _tmpl_department(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_TREATMENT]->(t:Treatment) "
+            "RETURN d.disease_name AS disease, t.cure_department AS department "
+            f"LIMIT {_DEFAULT_LIMIT}",
+            {},
+        )
+    wf = _where_filter_join("d", "t", exact)
+    return (
+        f"""
+        MATCH (d:Disease)-[:HAS_TREATMENT]->(t:Treatment)
+        {wf}LIMIT $limit
+        RETURN d.disease_name     AS disease,
+               t.cure_department  AS department
+        """,
+        {"name": entity, "limit": _DEFAULT_LIMIT},
+    )
+
+
+def _tmpl_profile(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    if not entity:
+        return (
+            "MATCH (d:Disease) "
+            "RETURN d.disease_name AS disease, d.disease_description AS description "
+            f"LIMIT {_DEFAULT_LIMIT}",
+            {},
+        )
+    wf = _where_filter_single("d", exact)
+    return (
+        f"""
+        MATCH (d:Disease)
+        {wf}LIMIT $limit
         OPTIONAL MATCH (d)-[:HAS_SYMPTOM]->(s:Symptom)
         OPTIONAL MATCH (d)-[:HAS_TREATMENT]->(t:Treatment)
         OPTIONAL MATCH (d)-[:IS_PRESCRIBED]->(m:Medicine)
         OPTIONAL MATCH (d)-[:HAS_ADVICE]->(a:Advice)
-        RETURN d.disease_name AS disease,
-               d.disease_description AS description,
-               d.disease_category AS category,
-               d.disease_cause AS cause,
-               s.disease_symptom AS symptoms,
-               s.check_method AS check_method,
-               s.people_easy_get AS risk_group,
-               t.cure_method AS treatment,
-               t.cure_department AS department,
-               t.cure_probability AS cure_rate,
-               m.drug_recommend AS recommended_drugs,
-               m.drug_common AS common_drugs,
-               a.nutrition_do_eat AS should_eat,
-               a.nutrition_not_eat AS should_avoid,
-               a.disease_prevention AS prevention
+        RETURN d.disease_name              AS disease,
+               d.disease_description       AS description,
+               d.disease_category          AS category,
+               d.disease_cause             AS cause,
+               s.disease_symptom           AS symptoms,
+               s.check_method              AS check_method,
+               s.people_easy_get           AS risk_group,
+               t.cure_method               AS treatment_method,
+               t.cure_department           AS department,
+               t.cure_probability          AS cure_rate,
+               m.drug_recommend            AS recommended_drugs,
+               m.drug_common               AS common_drugs,
+               a.nutrition_do_eat          AS should_eat,
+               a.nutrition_not_eat         AS should_avoid,
+               a.nutrition_recommend_meal  AS recommended_meals,
+               a.disease_prevention        AS prevention
         """,
-        {"name": disease_name},
+        {"name": entity, "limit": _DEFAULT_LIMIT},
     )
 
 
-def _build_linked_diseases_query(disease_name: str | None) -> tuple[str, dict]:
-    """Query: What diseases are linked to disease X?"""
-    if not disease_name:
-        return "MATCH (d1:Disease)-[:IS_LINKED_WITH]->(d2:Disease) RETURN d1.disease_name, d2.disease_name LIMIT 50", {}
-
+def _tmpl_linked_diseases(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    if not entity:
+        return (
+            "MATCH (d1:Disease)-[:IS_LINKED_WITH]->(d2:Disease) "
+            "RETURN d1.disease_name AS disease, d2.disease_name AS linked_disease "
+            f"LIMIT {_LINKED_LIMIT}",
+            {},
+        )
+    if exact:
+        where_sort = "WHERE d1.disease_name = $name\n        "
+    else:
+        where_sort = (
+            "WHERE toLower(d1.disease_name) CONTAINS toLower($name)\n"
+            "        WITH d1, d2,\n"
+            "             CASE\n"
+            "               WHEN toLower(d1.disease_name) = toLower($name)               THEN 0\n"
+            "               WHEN toLower(d1.disease_name) = 'bệnh ' + toLower($name)    THEN 1\n"
+            "               WHEN toLower(d1.disease_name) STARTS WITH toLower($name)     THEN 2\n"
+            "               ELSE 3\n"
+            "             END AS match_score\n"
+            "        ORDER BY match_score, d1.disease_name\n"
+            "        "
+        )
     return (
-        """
-        MATCH (d:Disease {disease_name: $name})-[:IS_LINKED_WITH]->(linked:Disease)
-        RETURN d.disease_name AS disease,
-               linked.disease_name AS linked_disease,
-               linked.disease_description AS linked_description
+        f"""
+        MATCH (d1:Disease)-[:IS_LINKED_WITH]->(d2:Disease)
+        {where_sort}LIMIT $limit
+        RETURN d1.disease_name      AS disease,
+               d2.disease_name      AS linked_disease,
+               d2.disease_category  AS linked_category
         """,
-        {"name": disease_name},
+        {"name": entity, "limit": _LINKED_LIMIT},
     )
 
 
-def _build_count_query(_disease_name: str | None) -> tuple[str, dict]:
-    """Query: How many diseases, symptoms, etc."""
+def _tmpl_count(_entity, _extra, _exact=False) -> tuple[str, dict]:
     return (
         """
-        MATCH (d:Disease) WITH count(d) AS disease_count
-        MATCH (:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
+        MATCH (d:Disease)
+        WITH count(d) AS disease_count
+        MATCH (s:Symptom)
         WITH disease_count, count(s) AS symptom_count
-        MATCH (:Disease)-[:IS_PRESCRIBED]->(m:Medicine)
+        MATCH (m:Medicine)
         WITH disease_count, symptom_count, count(m) AS medicine_count
-        MATCH (:Disease)-[:HAS_TREATMENT]->(t:Treatment)
-        RETURN disease_count,
-               symptom_count,
-               medicine_count,
-               count(t) AS treatment_count
+        MATCH (t:Treatment)
+        WITH disease_count, symptom_count, medicine_count, count(t) AS treatment_count
+        MATCH (a:Advice)
+        RETURN disease_count, symptom_count, medicine_count,
+               treatment_count, count(a) AS advice_count
         """,
         {},
     )
 
 
-def format_cypher_result_as_text(
-    query_type: str,
-    disease_name: str | None,
-    records: list[dict],
-) -> str:
-    """Convert Cypher query results into a Vietnamese natural language text.
-
-    This replaces the LLM Data-to-Text step for Cypher path queries,
-    providing deterministic formatting.
-
-    Args:
-        query_type: The type of query that was executed.
-        disease_name: The disease being queried.
-        records: The raw result records from Neo4j.
-
-    Returns:
-        A formatted Vietnamese text string.
-    """
-    if not records:
-        return f"Không tìm thấy thông tin về '{disease_name}' trong cơ sở dữ liệu."
-
-    r = records[0]  # VietMedKG star schema: 1 disease → 1 record per relationship
-
-    formatters = {
-        "symptoms": _fmt_symptoms,
-        "medicine": _fmt_medicine,
-        "treatment": _fmt_treatment,
-        "advice": _fmt_advice,
-        "prevention": _fmt_prevention,
-        "department": _fmt_department,
-        "profile": _fmt_profile,
-        "linked_diseases": _fmt_linked,
-        "count": _fmt_count,
+def _tmpl_count_by_type(entity: str | None, _extra, _exact=False) -> tuple[str, dict]:
+    label_map = {
+        "benh": "Disease", "bệnh": "Disease", "disease": "Disease",
+        "trieu chung": "Symptom", "triệu chứng": "Symptom", "symptom": "Symptom",
+        "thuoc": "Medicine", "thuốc": "Medicine", "drug": "Medicine", "medicine": "Medicine",
+        "dieu tri": "Treatment", "điều trị": "Treatment", "treatment": "Treatment",
+        "loi khuyen": "Advice", "lời khuyên": "Advice", "advice": "Advice",
     }
-
-    formatter = formatters.get(query_type, _fmt_profile)
-    return formatter(disease_name, r, records)
-
-
-def _safe(value: object) -> str:
-    """Safe string conversion, returning empty string for None."""
-    if value is None:
-        return ""
-    return str(value).strip()
-
-
-def _fmt_symptoms(name: str | None, r: dict, _records: list) -> str:
-    symptoms = _safe(r.get("symptoms"))
-    check = _safe(r.get("check"))
-    risk = _safe(r.get("risk_group"))
-
-    parts = [f"Bệnh {name or r.get('disease', 'N/A')} có các triệu chứng sau:"]
-    if symptoms:
-        parts.append(f"\n📋 Triệu chứng: {symptoms}")
-    if check:
-        parts.append(f"\n🔍 Phương pháp kiểm tra: {check}")
-    if risk:
-        parts.append(f"\n⚠️ Đối tượng dễ mắc: {risk}")
-    return "".join(parts)
-
-
-def _fmt_medicine(name: str | None, r: dict, _records: list) -> str:
-    parts = [f"Thuốc điều trị bệnh {name or r.get('disease', 'N/A')}:"]
-    rec = _safe(r.get("recommended_drugs"))
-    common = _safe(r.get("common_drugs"))
-    detail = _safe(r.get("drug_details"))
-
-    if rec:
-        parts.append(f"\n💊 Thuốc đề xuất: {rec}")
-    if common:
-        parts.append(f"\n💊 Thuốc phổ biến: {common}")
-    if detail:
-        parts.append(f"\nℹ️ Chi tiết: {detail}")
-    return "".join(parts)
-
-
-def _fmt_treatment(name: str | None, r: dict, _records: list) -> str:
-    parts = [f"Phương pháp điều trị bệnh {name or r.get('disease', 'N/A')}:"]
-    method = _safe(r.get("treatment_method"))
-    dept = _safe(r.get("department"))
-    rate = _safe(r.get("cure_rate"))
-
-    if method:
-        parts.append(f"\n💉 Phương pháp: {method}")
-    if dept:
-        parts.append(f"\n🏥 Khoa điều trị: {dept}")
-    if rate:
-        parts.append(f"\n📊 Tỉ lệ chữa khỏi: {rate}")
-    return "".join(parts)
-
-
-def _fmt_advice(name: str | None, r: dict, _records: list) -> str:
-    parts = [f"Lời khuyên dinh dưỡng cho bệnh {name or r.get('disease', 'N/A')}:"]
-    eat = _safe(r.get("should_eat"))
-    meal = _safe(r.get("recommended_meals"))
-    avoid = _safe(r.get("should_avoid"))
-    prev = _safe(r.get("prevention"))
-
-    if eat:
-        parts.append(f"\n✅ Nên ăn: {eat}")
-    if meal:
-        parts.append(f"\n🍽️ Món ăn đề xuất: {meal}")
-    if avoid:
-        parts.append(f"\n❌ Không nên ăn: {avoid}")
-    if prev:
-        parts.append(f"\n🛡️ Cách phòng tránh: {prev}")
-    return "".join(parts)
-
-
-def _fmt_prevention(name: str | None, r: dict, _records: list) -> str:
-    prev = _safe(r.get("prevention"))
-    if prev:
-        return f"Cách phòng tránh bệnh {name or r.get('disease', 'N/A')}:\n🛡️ {prev}"
-    return f"Không tìm thấy thông tin phòng tránh cho bệnh {name or 'N/A'}."
-
-
-def _fmt_department(name: str | None, r: dict, _records: list) -> str:
-    dept = _safe(r.get("department"))
-    if dept:
-        return f"Bệnh {name or r.get('disease', 'N/A')} được khám và điều trị tại: 🏥 {dept}."
-    return f"Không tìm thấy thông tin khoa điều trị cho bệnh {name or 'N/A'}."
-
-
-def _fmt_profile(name: str | None, r: dict, _records: list) -> str:
-    dn = name or _safe(r.get("disease"))
-    parts = [f"📋 THÔNG TIN BỆNH: {dn}\n"]
-
-    desc = _safe(r.get("description"))
-    if desc:
-        parts.append(f"Mô tả: {desc}\n")
-
-    cat = _safe(r.get("category"))
-    if cat:
-        parts.append(f"Loại bệnh: {cat}\n")
-
-    cause = _safe(r.get("cause"))
-    if cause:
-        parts.append(f"Nguyên nhân: {cause}\n")
-
-    symptoms = _safe(r.get("symptoms"))
-    if symptoms:
-        parts.append(f"Triệu chứng: {symptoms}\n")
-
-    treatment = _safe(r.get("treatment"))
-    if treatment:
-        parts.append(f"Điều trị: {treatment}\n")
-
-    dept = _safe(r.get("department"))
-    if dept:
-        parts.append(f"Khoa điều trị: {dept}\n")
-
-    rate = _safe(r.get("cure_rate"))
-    if rate:
-        parts.append(f"Tỉ lệ chữa khỏi: {rate}\n")
-
-    drugs = _safe(r.get("recommended_drugs"))
-    if drugs:
-        parts.append(f"Thuốc đề xuất: {drugs}\n")
-
-    eat = _safe(r.get("should_eat"))
-    if eat:
-        parts.append(f"Nên ăn: {eat}\n")
-
-    avoid = _safe(r.get("should_avoid"))
-    if avoid:
-        parts.append(f"Không nên ăn: {avoid}\n")
-
-    prev = _safe(r.get("prevention"))
-    if prev:
-        parts.append(f"Phòng tránh: {prev}\n")
-
-    return "".join(parts).strip()
-
-
-def _fmt_linked(name: str | None, _r: dict, records: list) -> str:
-    diseases = [_safe(r.get("linked_disease")) for r in records if r.get("linked_disease")]
-    if diseases:
-        items = ", ".join(diseases)
-        return f"Bệnh {name or 'N/A'} có liên quan đến các bệnh: {items}."
-    return f"Không tìm thấy bệnh đi kèm cho {name or 'N/A'}."
-
-
-def _fmt_count(_name: str | None, r: dict, _records: list) -> str:
+    label = label_map.get((entity or "").lower().strip(), "Disease")
     return (
-        f"📊 Thống kê cơ sở dữ liệu VietMedKG:\n"
-        f"  • Số bệnh: {r.get('disease_count', 'N/A')}\n"
-        f"  • Số triệu chứng: {r.get('symptom_count', 'N/A')}\n"
-        f"  • Số thuốc: {r.get('medicine_count', 'N/A')}\n"
-        f"  • Số phương pháp điều trị: {r.get('treatment_count', 'N/A')}"
+        f"MATCH (n:{label}) RETURN count(n) AS total, '{label}' AS node_type",
+        {},
     )
+
+
+def _tmpl_find_by_symptom(entity: str | None, _extra, _exact=False) -> tuple[str, dict]:
+    # disease_symptom là blob string — dùng CONTAINS để tìm kiếm ngược.
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) "
+            "RETURN d.disease_name AS disease, s.disease_symptom AS symptoms "
+            f"LIMIT {_FIND_BY_SYMPTOM_LIMIT}",
+            {},
+        )
+    return (
+        """
+        MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
+        WHERE toLower(s.disease_symptom) CONTAINS toLower($keyword)
+        RETURN d.disease_name     AS disease,
+               s.disease_symptom  AS symptoms,
+               s.check_method     AS check_method
+        ORDER BY d.disease_name
+        LIMIT $limit
+        """,
+        {"keyword": entity, "limit": _FIND_BY_SYMPTOM_LIMIT},
+    )
+
+
+def _tmpl_find_by_medicine(entity: str | None, _extra, _exact=False) -> tuple[str, dict]:
+    """Reverse: find diseases whose drug_common or drug_recommend contains keyword."""
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:IS_PRESCRIBED]->(m:Medicine) "
+            "RETURN d.disease_name AS disease, m.drug_common AS matched_common "
+            f"LIMIT {_FIND_BY_SYMPTOM_LIMIT}",
+            {},
+        )
+    return (
+        """
+        MATCH (d:Disease)-[:IS_PRESCRIBED]->(m:Medicine)
+        WHERE toLower(m.drug_common) CONTAINS toLower($keyword)
+           OR toLower(m.drug_recommend) CONTAINS toLower($keyword)
+        RETURN d.disease_name    AS disease,
+               m.drug_common     AS matched_common,
+               m.drug_recommend  AS matched_recommend
+        ORDER BY d.disease_name
+        LIMIT $limit
+        """,
+        {"keyword": entity, "limit": _FIND_BY_SYMPTOM_LIMIT},
+    )
+
+
+def _tmpl_find_by_nutrition_avoid(entity: str | None, _extra, _exact=False) -> tuple[str, dict]:
+    """Reverse: find diseases whose nutrition_not_eat contains keyword."""
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice) "
+            "WHERE a.nutrition_not_eat IS NOT NULL "
+            "RETURN d.disease_name AS disease, a.nutrition_not_eat AS matched_advice "
+            f"LIMIT {_FIND_BY_SYMPTOM_LIMIT}",
+            {},
+        )
+    return (
+        """
+        MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice)
+        WHERE toLower(a.nutrition_not_eat) CONTAINS toLower($keyword)
+        RETURN d.disease_name       AS disease,
+               a.nutrition_not_eat  AS matched_advice
+        ORDER BY d.disease_name
+        LIMIT $limit
+        """,
+        {"keyword": entity, "limit": _FIND_BY_SYMPTOM_LIMIT},
+    )
+
+
+def _tmpl_find_by_nutrition_eat(entity: str | None, _extra, _exact=False) -> tuple[str, dict]:
+    """Reverse: find diseases whose nutrition_do_eat or nutrition_recommend_meal contains keyword."""
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice) "
+            "WHERE a.nutrition_do_eat IS NOT NULL "
+            "RETURN d.disease_name AS disease, a.nutrition_do_eat AS matched_do_eat "
+            f"LIMIT {_FIND_BY_SYMPTOM_LIMIT}",
+            {},
+        )
+    return (
+        """
+        MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice)
+        WHERE toLower(a.nutrition_do_eat) CONTAINS toLower($keyword)
+           OR toLower(a.nutrition_recommend_meal) CONTAINS toLower($keyword)
+        RETURN d.disease_name              AS disease,
+               a.nutrition_do_eat          AS matched_do_eat,
+               a.nutrition_recommend_meal  AS matched_recommend
+        ORDER BY d.disease_name
+        LIMIT $limit
+        """,
+        {"keyword": entity, "limit": _FIND_BY_SYMPTOM_LIMIT},
+    )
+
+
+def _tmpl_find_by_prevention(entity: str | None, _extra, _exact=False) -> tuple[str, dict]:
+    """Reverse: find diseases whose disease_prevention contains keyword."""
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice) "
+            "WHERE a.disease_prevention IS NOT NULL "
+            "RETURN d.disease_name AS disease, a.disease_prevention AS matched_prevention "
+            f"LIMIT {_FIND_BY_SYMPTOM_LIMIT}",
+            {},
+        )
+    return (
+        """
+        MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice)
+        WHERE toLower(a.disease_prevention) CONTAINS toLower($keyword)
+        RETURN d.disease_name        AS disease,
+               a.disease_prevention  AS matched_prevention
+        ORDER BY d.disease_name
+        LIMIT $limit
+        """,
+        {"keyword": entity, "limit": _FIND_BY_SYMPTOM_LIMIT},
+    )
+
+
+def _tmpl_linked_with_info(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    if not entity:
+        return (
+            "MATCH (d1:Disease)-[:IS_LINKED_WITH]->(d2:Disease) "
+            "RETURN d1.disease_name AS source_disease, d2.disease_name AS linked_disease "
+            f"LIMIT {_LINKED_LIMIT}",
+            {},
+        )
+    if exact:
+        where_sort = "WHERE d1.disease_name = $name\n        "
+    else:
+        where_sort = (
+            "WHERE toLower(d1.disease_name) CONTAINS toLower($name)\n"
+            "        WITH d1, d2,\n"
+            "             CASE\n"
+            "               WHEN toLower(d1.disease_name) = toLower($name)               THEN 0\n"
+            "               WHEN toLower(d1.disease_name) = 'bệnh ' + toLower($name)    THEN 1\n"
+            "               WHEN toLower(d1.disease_name) STARTS WITH toLower($name)     THEN 2\n"
+            "               ELSE 3\n"
+            "             END AS match_score\n"
+            "        ORDER BY match_score, d1.disease_name\n"
+            "        "
+        )
+    return (
+        f"""
+        MATCH (d1:Disease)-[:IS_LINKED_WITH]->(d2:Disease)
+        {where_sort}LIMIT $limit
+        OPTIONAL MATCH (d2)-[:HAS_SYMPTOM]->(s2:Symptom)
+        OPTIONAL MATCH (d2)-[:HAS_TREATMENT]->(t2:Treatment)
+        RETURN d1.disease_name     AS source_disease,
+               d2.disease_name     AS linked_disease,
+               s2.disease_symptom  AS linked_symptoms,
+               t2.cure_method      AS linked_treatment,
+               t2.cure_department  AS linked_department
+        """,
+        {"name": entity, "limit": _LINKED_LIMIT},
+    )
+
+
+def _tmpl_compare_diseases(entity: str | None, extra: str | None, _exact=False) -> tuple[str, dict]:
+    # Symptoms là blob 1:1 với Disease — không thể tìm shared symptoms trong Cypher.
+    # Template trả về cả hai blob để LLM synthesizer tổng hợp điểm chung/khác.
+    return (
+        """
+        MATCH (d1:Disease)-[:HAS_SYMPTOM]->(s1:Symptom)
+        WHERE toLower(d1.disease_name) CONTAINS toLower($name1)
+        MATCH (d2:Disease)-[:HAS_SYMPTOM]->(s2:Symptom)
+        WHERE toLower(d2.disease_name) CONTAINS toLower($name2)
+        RETURN d1.disease_name     AS disease1,
+               s1.disease_symptom  AS symptoms1,
+               d2.disease_name     AS disease2,
+               s2.disease_symptom  AS symptoms2
+        LIMIT 5
+        """,
+        {"name1": entity or "", "name2": extra or ""},
+    )
+

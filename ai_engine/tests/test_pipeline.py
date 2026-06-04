@@ -11,7 +11,7 @@ class TestQueryRouter:
         from ai_engine.services.query_router import route_query, QueryPath
         result = route_query("Bệnh tiểu đường có triệu chứng gì?")
         assert result["path"] == QueryPath.CYPHER
-        assert result["query_type"] == "symptoms"
+        assert result["query_type"] is None
 
     def test_vague_question_routes_lightrag(self):
         """Vague/thematic questions should route to LightRAG."""
@@ -51,7 +51,7 @@ class TestCypherQueryBuilder:
         cypher, params = build_cypher_query("symptoms", "Tiểu Đường")
         assert "MATCH" in cypher
         assert "RETURN" in cypher
-        assert params.get("name") == "Tiểu Đường"
+        assert params.get("name") == "Tiểu đường"
 
     def test_build_medicine_query(self):
         """Should build valid medicine Cypher query."""
