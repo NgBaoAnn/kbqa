@@ -6,6 +6,7 @@ This service is retained for:
 - Health check for database connectivity
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -17,21 +18,29 @@ logger = logging.getLogger(__name__)
 
 # ── Singleton driver ──────────────────────────────────────────────────────
 _driver = None
+_driver_lock = asyncio.Lock()
 
 
-def get_driver():
-    """Get or create the Neo4j async driver (singleton).
+async def get_driver():
+    """Get or create the Neo4j async driver singleton.
+
+    Uses double-checked locking to ensure thread-safe initialization,
+    consistent with lightrag_service.py singleton pattern.
 
     Returns:
         An async Neo4j driver instance.
     """
     global _driver
-    if _driver is None:
-        _driver = AsyncGraphDatabase.driver(
-            NEO4J_URI,
-            auth=(NEO4J_USERNAME, NEO4J_PASSWORD),
-        )
-        logger.info("Neo4j driver created for: %s", NEO4J_URI)
+    if _driver is not None:
+        return _driver
+    async with _driver_lock:
+        # Double-check after acquiring lock
+        if _driver is None:
+            _driver = AsyncGraphDatabase.driver(
+                NEO4J_URI,
+                auth=(NEO4J_USERNAME, NEO4J_PASSWORD),
+            )
+            logger.info("Neo4j driver created for: %s", NEO4J_URI)
     return _driver
 
 
@@ -45,7 +54,7 @@ async def execute_cypher(query: str, parameters: dict | None = None) -> list[dic
     Returns:
         List of record dictionaries.
     """
-    driver = get_driver()
+    driver = await get_driver()
 
     async with driver.session() as session:
         result = await session.run(query, parameters or {})
@@ -61,7 +70,7 @@ async def check_connectivity() -> bool:
         True if connected successfully.
     """
     try:
-        driver = get_driver()
+        driver = await get_driver()
         await driver.verify_connectivity()
         return True
     except Exception as e:
@@ -76,13 +85,9 @@ async def get_schema_info() -> dict[str, Any]:
         Dict with node labels, relationship types, and counts.
     """
     try:
-        # Get node labels and counts
-        node_query = """
-        CALL db.labels() YIELD label
-        CALL apoc.cypher.run('MATCH (n:' + label + ') RETURN count(n) AS count', {}) YIELD value
-        RETURN label, value.count AS count
-        """
-        # Simpler fallback without APOC
+        # APOC not available in AuraDB — using simpler db.labels() query.
+        # N+1 pattern intentional here: called only by /schema health endpoint,
+        # not in the hot query path.
         node_query_simple = """
         CALL db.labels() YIELD label
         RETURN label
