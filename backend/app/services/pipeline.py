@@ -53,6 +53,10 @@ MSG_SYSTEM_ERROR = "Hệ thống đang gặp sự cố. Vui lòng thử lại sa
 MSG_TIMEOUT = "Xử lý mất quá lâu. Vui lòng thử câu hỏi ngắn hơn."
 MSG_NO_DATA = "Không tìm thấy thông tin về chủ đề này trong cơ sở dữ liệu."
 
+# ── Engine name constants ─────────────────────────────────────────────────
+ENGINE_CYPHER = "cypher_direct"
+ENGINE_LIGHTRAG = "lightrag"
+
 
 async def run_pipeline(
     question: str,
@@ -354,7 +358,7 @@ async def _execute_cypher_path(
         query_mode=f"cypher:{'template' if use_template else 'llm'}:{query_type}",
         execution_time_ms=elapsed_ms,
     )
-    response["metadata"]["engine"] = "cypher_direct"
+    response["metadata"]["engine"] = ENGINE_CYPHER
     response["metadata"]["cypher"] = cypher.strip()
 
     if use_template:
@@ -444,7 +448,7 @@ async def _execute_lightrag_path(
             )
         else:
             return format_error_response(
-                error_code="CYPHER_GENERATION_FAILED",
+                error_code="LIGHTRAG_QUERY_FAILED",
                 error_message=error_msg,
                 user_message=MSG_GENERATION_FAILED,
                 execution_time_ms=elapsed_ms,

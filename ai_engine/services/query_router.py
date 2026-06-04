@@ -63,36 +63,6 @@ class QueryPath:
     LIGHTRAG = "lightrag"   # LightRAG graph-enhanced retrieval
 
 
-# ── Patterns that indicate a direct Cypher query is more precise ──────────
-
-# Vietnamese patterns for exact lookup
-EXACT_LOOKUP_PATTERNS_VI = [
-    # "triệu chứng (của) X (là gì)"
-    r"triệu chứng\s+(?:của\s+)?(?:bệnh\s+)?(.+?)(?:\s+là|\s+gồm|\?|$)",
-    # "X có triệu chứng gì / những triệu chứng gì"
-    r"(.+?)\s+có\s+(?:những\s+)?triệu chứng\s+(?:gì|nào)",
-    # "thuốc (điều trị / chữa / trị) X"
-    r"thuốc\s+(?:điều trị|chữa|trị)\s+(?:bệnh\s+)?(.+?)(?:\?|$)",
-    # "X (dùng / uống) thuốc gì"
-    r"(.+?)\s+(?:dùng|uống|điều trị bằng)\s+thuốc\s+(?:gì|nào)",
-    # "X điều trị (bằng cách) nào / như thế nào"
-    r"(?:bệnh\s+)?(.+?)\s+điều trị\s+(?:bằng\s+cách\s+)?(?:nào|như thế nào)",
-    # "khoa điều trị X"
-    r"khoa\s+(?:điều trị|khám)\s+(?:bệnh\s+)?(.+?)(?:\?|$)",
-    # "X nên ăn gì / không nên ăn gì"
-    r"(?:bị\s+)?(.+?)\s+(?:nên|không nên)\s+ăn\s+(?:gì|những gì)",
-    # "phòng tránh X (như thế nào)"
-    r"(?:cách\s+)?phòng\s+(?:tránh|ngừa)\s+(?:bệnh\s+)?(.+?)(?:\?|$)",
-]
-
-# English patterns for exact lookup
-EXACT_LOOKUP_PATTERNS_EN = [
-    r"symptoms?\s+of\s+(.+?)(?:\?|$)",
-    r"(?:what|which)\s+(?:drugs?|medicines?)\s+(?:treat|cure|for)\s+(.+?)(?:\?|$)",
-    r"(?:how|what)\s+(?:to\s+)?treat\s+(.+?)(?:\?|$)",
-    r"(?:treatment|cure)\s+for\s+(.+?)(?:\?|$)",
-]
-
 # Count/statistics patterns
 COUNT_PATTERNS = [
     r"bao nhiêu\s+(?:bệnh|triệu chứng|thuốc)",
@@ -101,13 +71,6 @@ COUNT_PATTERNS = [
     r"(?:count|total)\s+(?:of\s+)?(?:diseases?|symptoms?|drugs?)",
     r"top\s+\d+",
     r"thống kê",
-]
-
-# Full profile patterns — "cho tôi thông tin về X", "X là bệnh gì"
-PROFILE_PATTERNS = [
-    r"(?:toàn bộ\s+)?thông tin\s+(?:về\s+)?(?:bệnh\s+)?(.+?)(?:\?|$)",
-    r"(?:cho tôi biết|nói cho tôi)\s+(?:về\s+)?(?:bệnh\s+)?(.+?)(?:\?|$)",
-    r"(.+?)\s+là\s+(?:bệnh\s+)?gì",
 ]
 
 
@@ -327,58 +290,7 @@ def classify_cypher_intent(question: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-def route_query(question: str) -> dict:
-    """Decide which query path to use for a given question.
 
-    This is the core decision logic of Phương án C (Hybrid).
-
-    Args:
-        question: The user's natural language question.
-
-    Returns:
-        Dict with:
-            - path: QueryPath.CYPHER or QueryPath.LIGHTRAG
-            - disease_name: extracted disease name (if applicable)
-            - query_type: specific query type for Cypher path
-            - reason: explanation of the routing decision
-    """
-    q_lower = question.lower().strip()
-
-    # ── Priority 1: Count/statistics → Cypher ─────────────────────────────
-    for pattern in COUNT_PATTERNS:
-        if re.search(pattern, q_lower):
-            logger.info("Route → CYPHER (count): %s", question[:80])
-            return {
-                "path": QueryPath.CYPHER,
-                "disease_name": None,
-                "query_type": "count",
-                "reason": "Câu hỏi thống kê/đếm → Cypher",
-            }
-
-    # ── Priority 2: Structured entity lookup → Cypher ────────────────────
-    all_cypher_patterns = EXACT_LOOKUP_PATTERNS_VI + EXACT_LOOKUP_PATTERNS_EN + PROFILE_PATTERNS
-    for pattern in all_cypher_patterns:
-        if re.search(pattern, question, re.IGNORECASE):
-            query_type, entity = classify_cypher_intent(question)
-            logger.info(
-                "Route → CYPHER (type=%s, entity=%s): %s",
-                query_type, entity, question[:80],
-            )
-            return {
-                "path": QueryPath.CYPHER,
-                "disease_name": entity,
-                "query_type": query_type,
-                "reason": f"Pattern match → Cypher template (type={query_type})",
-            }
-
-    # ── Priority 3: Everything else → LightRAG ───────────────────────────
-    logger.info("Route → LIGHTRAG (semantic/thematic): %s", question[:80])
-    return {
-        "path": QueryPath.LIGHTRAG,
-        "disease_name": None,
-        "query_type": None,
-        "reason": "Câu hỏi mơ hồ/thematic/suy luận → LightRAG retrieval",
-    }
 
 
 # ── LLM Structured Intent Extraction (fallback) ───────────────────────────
@@ -513,9 +425,6 @@ A: {"query_type": "linked_diseases", "entity": "viêm phổi"}
 
 Q: "bệnh nào đi kèm với tiểu đường"
 A: {"query_type": "linked_diseases", "entity": "tiểu đường"}
-
-Q: "tiêm vắc-xìn BCG phòng bệnh gì"
-A: {"query_type": "find_by_prevention", "entity": "vắc-xìn BCG"}
 
 Q: "bao nhiêu bệnh trong cơ sở dữ liệu"
 A: {"query_type": "count", "entity": null}

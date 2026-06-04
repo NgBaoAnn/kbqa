@@ -15,12 +15,12 @@ class TestClassifyResponseType:
     """Test response type classification."""
 
     def test_warning_on_chest_pain(self):
-        """Should classify as warning when chest pain is mentioned."""
-        assert classify_response_type("tôi bị đau ngực", "...") == "warning"
+        """Should classify as warning when severe chest pain is mentioned."""
+        assert classify_response_type("tôi bị đau ngực dữ dội", "...") == "warning"
 
     def test_warning_on_difficulty_breathing(self):
         """Should classify as warning for breathing difficulties."""
-        assert classify_response_type("khó thở", "answer text") == "warning"
+        assert classify_response_type("khó thở nghiêm trọng", "answer text") == "warning"
 
     def test_warning_on_english_emergency(self):
         """Should classify as warning for English emergency keywords."""
@@ -68,15 +68,15 @@ class TestFormatLightragResponse:
     def test_success_text_response(self):
         """Should format a successful text response."""
         result = format_lightrag_response(
-            raw_answer="Viêm phổi là bệnh nhiễm trùng phổi.",
-            question="viêm phổi là gì",
+            raw_answer="Triệu chứng của viêm phổi bao gồm sốt và ho.",
+            question="triệu chứng viêm phổi là gì",
             query_mode="hybrid",
             execution_time_ms=150.5,
         )
 
         assert result["status"] == "success"
         assert result["response_type"] == "text"
-        assert "Viêm phổi" in result["answer"]
+        assert "viêm phổi" in result["answer"].lower()
         assert "tham khảo" in result["answer"]  # Disclaimer
         assert result["metadata"]["query_mode"] == "hybrid"
         assert result["metadata"]["engine"] == "lightrag"

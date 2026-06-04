@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_LIMIT = 5
 _LINKED_LIMIT = 10
-_FIND_BY_SYMPTOM_LIMIT = 10
+_REVERSE_QUERY_LIMIT = 10
 
 # Tiered CASE expression for fuzzy entity matching.
 # Score 0 = exact, 1 = "bệnh " + exact, 2 = starts-with, 3 = general contains.
@@ -58,8 +58,6 @@ def build_cypher_query(
         "find_by_nutrition_avoid": _tmpl_find_by_nutrition_avoid,
         "find_by_nutrition_eat": _tmpl_find_by_nutrition_eat,
         "find_by_prevention":    _tmpl_find_by_prevention,
-        "linked_with_info":      _tmpl_linked_with_info,
-        "compare_diseases":      _tmpl_compare_diseases,
     }
 
     builder = builders.get(query_type)
@@ -77,49 +75,21 @@ def build_cypher_query(
 
 # ── Templates ──────────────────────────────────────────────────────────────
 
-def _where_filter(alias: str, exact: bool) -> str:
-    """Return the WHERE + optional tiered-sort clause for an entity-based template."""
+def _build_where_clause(alias: str, extra_vars: list[str], exact: bool) -> str:
+    """Return the WHERE + optional tiered-sort clause for an entity-based template.
+
+    Args:
+        alias:      The Disease node alias (e.g. "d").
+        extra_vars: Additional variables to carry through WITH for tiered sort
+                    (e.g. ["s"], ["m"], []).  Empty list → single-node pattern.
+        exact:      When True, use equality match; skip tiered sort.
+    """
     if exact:
         return f"WHERE {alias}.disease_name = $name\n        "
+    with_clause = ", ".join([alias] + extra_vars) if extra_vars else alias
     return (
         f"WHERE toLower({alias}.disease_name) CONTAINS toLower($name)\n"
-        f"        WITH {alias}, s,\n"
-        f"             CASE\n"
-        f"               WHEN toLower({alias}.disease_name) = toLower($name)               THEN 0\n"
-        f"               WHEN toLower({alias}.disease_name) = 'bệnh ' + toLower($name)    THEN 1\n"
-        f"               WHEN toLower({alias}.disease_name) STARTS WITH toLower($name)     THEN 2\n"
-        f"               ELSE 3\n"
-        f"             END AS match_score\n"
-        f"        ORDER BY match_score, {alias}.disease_name\n"
-        f"        "
-    )
-
-
-def _where_filter_single(alias: str, exact: bool) -> str:
-    """Same as _where_filter but without the s variable in WITH (for single-node MATCH)."""
-    if exact:
-        return f"WHERE {alias}.disease_name = $name\n        "
-    return (
-        f"WHERE toLower({alias}.disease_name) CONTAINS toLower($name)\n"
-        f"        WITH {alias},\n"
-        f"             CASE\n"
-        f"               WHEN toLower({alias}.disease_name) = toLower($name)               THEN 0\n"
-        f"               WHEN toLower({alias}.disease_name) = 'bệnh ' + toLower($name)    THEN 1\n"
-        f"               WHEN toLower({alias}.disease_name) STARTS WITH toLower($name)     THEN 2\n"
-        f"               ELSE 3\n"
-        f"             END AS match_score\n"
-        f"        ORDER BY match_score, {alias}.disease_name\n"
-        f"        "
-    )
-
-
-def _where_filter_join(alias: str, join_var: str, exact: bool) -> str:
-    """WHERE + tiered sort for MATCH with a join variable (not s)."""
-    if exact:
-        return f"WHERE {alias}.disease_name = $name\n        "
-    return (
-        f"WHERE toLower({alias}.disease_name) CONTAINS toLower($name)\n"
-        f"        WITH {alias}, {join_var},\n"
+        f"        WITH {with_clause},\n"
         f"             CASE\n"
         f"               WHEN toLower({alias}.disease_name) = toLower($name)               THEN 0\n"
         f"               WHEN toLower({alias}.disease_name) = 'bệnh ' + toLower($name)    THEN 1\n"
@@ -139,7 +109,7 @@ def _tmpl_symptoms(entity: str | None, _extra, exact: bool = False) -> tuple[str
             f"LIMIT {_DEFAULT_LIMIT}",
             {},
         )
-    wf = _where_filter("d", exact)
+    wf = _build_where_clause("d", ["s"], exact)
     return (
         f"""
         MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
@@ -161,7 +131,7 @@ def _tmpl_medicine(entity: str | None, _extra, exact: bool = False) -> tuple[str
             f"LIMIT {_DEFAULT_LIMIT}",
             {},
         )
-    wf = _where_filter_join("d", "m", exact)
+    wf = _build_where_clause("d", ["m"], exact)
     return (
         f"""
         MATCH (d:Disease)-[:IS_PRESCRIBED]->(m:Medicine)
@@ -183,7 +153,7 @@ def _tmpl_treatment(entity: str | None, _extra, exact: bool = False) -> tuple[st
             f"LIMIT {_DEFAULT_LIMIT}",
             {},
         )
-    wf = _where_filter_join("d", "t", exact)
+    wf = _build_where_clause("d", ["t"], exact)
     return (
         f"""
         MATCH (d:Disease)-[:HAS_TREATMENT]->(t:Treatment)
@@ -208,7 +178,7 @@ def _tmpl_advice(entity: str | None, _extra, exact: bool = False) -> tuple[str, 
             f"LIMIT {_DEFAULT_LIMIT}",
             {},
         )
-    wf = _where_filter_join("d", "a", exact)
+    wf = _build_where_clause("d", ["a"], exact)
     return (
         f"""
         MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice)
@@ -231,7 +201,7 @@ def _tmpl_prevention(entity: str | None, _extra, exact: bool = False) -> tuple[s
             f"LIMIT {_DEFAULT_LIMIT}",
             {},
         )
-    wf = _where_filter_join("d", "a", exact)
+    wf = _build_where_clause("d", ["a"], exact)
     return (
         f"""
         MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice)
@@ -251,7 +221,7 @@ def _tmpl_department(entity: str | None, _extra, exact: bool = False) -> tuple[s
             f"LIMIT {_DEFAULT_LIMIT}",
             {},
         )
-    wf = _where_filter_join("d", "t", exact)
+    wf = _build_where_clause("d", ["t"], exact)
     return (
         f"""
         MATCH (d:Disease)-[:HAS_TREATMENT]->(t:Treatment)
@@ -271,7 +241,7 @@ def _tmpl_profile(entity: str | None, _extra, exact: bool = False) -> tuple[str,
             f"LIMIT {_DEFAULT_LIMIT}",
             {},
         )
-    wf = _where_filter_single("d", exact)
+    wf = _build_where_clause("d", [], exact)
     return (
         f"""
         MATCH (d:Disease)
@@ -376,7 +346,7 @@ def _tmpl_find_by_symptom(entity: str | None, _extra, _exact=False) -> tuple[str
         return (
             "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) "
             "RETURN d.disease_name AS disease, s.disease_symptom AS symptoms "
-            f"LIMIT {_FIND_BY_SYMPTOM_LIMIT}",
+            f"LIMIT {_REVERSE_QUERY_LIMIT}",
             {},
         )
     return (
@@ -389,7 +359,7 @@ def _tmpl_find_by_symptom(entity: str | None, _extra, _exact=False) -> tuple[str
         ORDER BY d.disease_name
         LIMIT $limit
         """,
-        {"keyword": entity, "limit": _FIND_BY_SYMPTOM_LIMIT},
+        {"keyword": entity, "limit": _REVERSE_QUERY_LIMIT},
     )
 
 
@@ -399,7 +369,7 @@ def _tmpl_find_by_medicine(entity: str | None, _extra, _exact=False) -> tuple[st
         return (
             "MATCH (d:Disease)-[:IS_PRESCRIBED]->(m:Medicine) "
             "RETURN d.disease_name AS disease, m.drug_common AS matched_common "
-            f"LIMIT {_FIND_BY_SYMPTOM_LIMIT}",
+            f"LIMIT {_REVERSE_QUERY_LIMIT}",
             {},
         )
     return (
@@ -413,7 +383,7 @@ def _tmpl_find_by_medicine(entity: str | None, _extra, _exact=False) -> tuple[st
         ORDER BY d.disease_name
         LIMIT $limit
         """,
-        {"keyword": entity, "limit": _FIND_BY_SYMPTOM_LIMIT},
+        {"keyword": entity, "limit": _REVERSE_QUERY_LIMIT},
     )
 
 
@@ -424,7 +394,7 @@ def _tmpl_find_by_nutrition_avoid(entity: str | None, _extra, _exact=False) -> t
             "MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice) "
             "WHERE a.nutrition_not_eat IS NOT NULL "
             "RETURN d.disease_name AS disease, a.nutrition_not_eat AS matched_advice "
-            f"LIMIT {_FIND_BY_SYMPTOM_LIMIT}",
+            f"LIMIT {_REVERSE_QUERY_LIMIT}",
             {},
         )
     return (
@@ -436,7 +406,7 @@ def _tmpl_find_by_nutrition_avoid(entity: str | None, _extra, _exact=False) -> t
         ORDER BY d.disease_name
         LIMIT $limit
         """,
-        {"keyword": entity, "limit": _FIND_BY_SYMPTOM_LIMIT},
+        {"keyword": entity, "limit": _REVERSE_QUERY_LIMIT},
     )
 
 
@@ -447,7 +417,7 @@ def _tmpl_find_by_nutrition_eat(entity: str | None, _extra, _exact=False) -> tup
             "MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice) "
             "WHERE a.nutrition_do_eat IS NOT NULL "
             "RETURN d.disease_name AS disease, a.nutrition_do_eat AS matched_do_eat "
-            f"LIMIT {_FIND_BY_SYMPTOM_LIMIT}",
+            f"LIMIT {_REVERSE_QUERY_LIMIT}",
             {},
         )
     return (
@@ -461,7 +431,7 @@ def _tmpl_find_by_nutrition_eat(entity: str | None, _extra, _exact=False) -> tup
         ORDER BY d.disease_name
         LIMIT $limit
         """,
-        {"keyword": entity, "limit": _FIND_BY_SYMPTOM_LIMIT},
+        {"keyword": entity, "limit": _REVERSE_QUERY_LIMIT},
     )
 
 
@@ -472,7 +442,7 @@ def _tmpl_find_by_prevention(entity: str | None, _extra, _exact=False) -> tuple[
             "MATCH (d:Disease)-[:HAS_ADVICE]->(a:Advice) "
             "WHERE a.disease_prevention IS NOT NULL "
             "RETURN d.disease_name AS disease, a.disease_prevention AS matched_prevention "
-            f"LIMIT {_FIND_BY_SYMPTOM_LIMIT}",
+            f"LIMIT {_REVERSE_QUERY_LIMIT}",
             {},
         )
     return (
@@ -484,64 +454,9 @@ def _tmpl_find_by_prevention(entity: str | None, _extra, _exact=False) -> tuple[
         ORDER BY d.disease_name
         LIMIT $limit
         """,
-        {"keyword": entity, "limit": _FIND_BY_SYMPTOM_LIMIT},
+        {"keyword": entity, "limit": _REVERSE_QUERY_LIMIT},
     )
 
 
-def _tmpl_linked_with_info(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
-    if not entity:
-        return (
-            "MATCH (d1:Disease)-[:IS_LINKED_WITH]->(d2:Disease) "
-            "RETURN d1.disease_name AS source_disease, d2.disease_name AS linked_disease "
-            f"LIMIT {_LINKED_LIMIT}",
-            {},
-        )
-    if exact:
-        where_sort = "WHERE d1.disease_name = $name\n        "
-    else:
-        where_sort = (
-            "WHERE toLower(d1.disease_name) CONTAINS toLower($name)\n"
-            "        WITH d1, d2,\n"
-            "             CASE\n"
-            "               WHEN toLower(d1.disease_name) = toLower($name)               THEN 0\n"
-            "               WHEN toLower(d1.disease_name) = 'bệnh ' + toLower($name)    THEN 1\n"
-            "               WHEN toLower(d1.disease_name) STARTS WITH toLower($name)     THEN 2\n"
-            "               ELSE 3\n"
-            "             END AS match_score\n"
-            "        ORDER BY match_score, d1.disease_name\n"
-            "        "
-        )
-    return (
-        f"""
-        MATCH (d1:Disease)-[:IS_LINKED_WITH]->(d2:Disease)
-        {where_sort}LIMIT $limit
-        OPTIONAL MATCH (d2)-[:HAS_SYMPTOM]->(s2:Symptom)
-        OPTIONAL MATCH (d2)-[:HAS_TREATMENT]->(t2:Treatment)
-        RETURN d1.disease_name     AS source_disease,
-               d2.disease_name     AS linked_disease,
-               s2.disease_symptom  AS linked_symptoms,
-               t2.cure_method      AS linked_treatment,
-               t2.cure_department  AS linked_department
-        """,
-        {"name": entity, "limit": _LINKED_LIMIT},
-    )
 
-
-def _tmpl_compare_diseases(entity: str | None, extra: str | None, _exact=False) -> tuple[str, dict]:
-    # Symptoms là blob 1:1 với Disease — không thể tìm shared symptoms trong Cypher.
-    # Template trả về cả hai blob để LLM synthesizer tổng hợp điểm chung/khác.
-    return (
-        """
-        MATCH (d1:Disease)-[:HAS_SYMPTOM]->(s1:Symptom)
-        WHERE toLower(d1.disease_name) CONTAINS toLower($name1)
-        MATCH (d2:Disease)-[:HAS_SYMPTOM]->(s2:Symptom)
-        WHERE toLower(d2.disease_name) CONTAINS toLower($name2)
-        RETURN d1.disease_name     AS disease1,
-               s1.disease_symptom  AS symptoms1,
-               d2.disease_name     AS disease2,
-               s2.disease_symptom  AS symptoms2
-        LIMIT 5
-        """,
-        {"name1": entity or "", "name2": extra or ""},
-    )
 
