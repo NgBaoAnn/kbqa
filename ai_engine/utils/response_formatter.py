@@ -161,7 +161,7 @@ _NO_DISCLAIMER_MODES = {
     # Purely informational / navigational — no disclaimer needed
     "count", "count_by_type", "disambiguation",
     "department",                           # just which clinic to go to
-    "linked_diseases", "linked_with_info",  # factual disease relationships
+    "linked_diseases",                       # factual disease relationships
     "find_by_symptom", "find_by_medicine",  # reverse lookup, not advice
     "find_by_nutrition_avoid", "find_by_nutrition_eat",
     "find_by_prevention",
