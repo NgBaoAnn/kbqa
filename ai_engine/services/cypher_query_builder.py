@@ -95,8 +95,6 @@ def build_cypher_query(
         "find_by_nutrition_avoid": _tmpl_find_by_nutrition_avoid,
         "find_by_nutrition_eat": _tmpl_find_by_nutrition_eat,
         "find_by_prevention":    _tmpl_find_by_prevention,
-        "linked_with_info":      _tmpl_linked_with_info,
-        "compare_diseases":      _tmpl_compare_diseases,
     }
 
     builder = builders.get(query_type)

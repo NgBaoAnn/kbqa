@@ -11,7 +11,7 @@ class TestPipelineOrchestrator:
     async def test_empty_question_returns_invalid(self):
         """Empty question should return INVALID_QUESTION error."""
         from app.services.pipeline import run_pipeline
-        result = await run_pipeline(question="", language="vi")
+        result = await run_pipeline(question="")
         assert result["status"] == "error"
         assert result["metadata"]["error_code"] == "INVALID_QUESTION"
 
@@ -19,7 +19,7 @@ class TestPipelineOrchestrator:
     async def test_whitespace_question_returns_invalid(self):
         """Whitespace-only question should return INVALID_QUESTION."""
         from app.services.pipeline import run_pipeline
-        result = await run_pipeline(question="   ", language="vi")
+        result = await run_pipeline(question="   ")
         assert result["status"] == "error"
         assert result["metadata"]["error_code"] == "INVALID_QUESTION"
 
@@ -29,7 +29,7 @@ class TestPipelineOrchestrator:
         mock_result = {"success": True, "answer": "Test answer", "mode": "hybrid"}
         with patch("ai_engine.services.lightrag_service.query", new_callable=AsyncMock, return_value=mock_result):
             from app.services.pipeline import run_pipeline
-            result = await run_pipeline(question="test question", language="vi", mode="hybrid")
+            result = await run_pipeline(question="test question", mode="hybrid")
             assert result["status"] == "success"
 
     @pytest.mark.asyncio
@@ -38,7 +38,7 @@ class TestPipelineOrchestrator:
         mock_result = {"success": True, "answer": "Test answer", "mode": "hybrid"}
         with patch("ai_engine.services.lightrag_service.query", new_callable=AsyncMock, return_value=mock_result):
             from app.services.pipeline import run_pipeline
-            result = await run_pipeline(question="test question", language="vi", mode="hybrid")
+            result = await run_pipeline(question="test question", mode="hybrid")
             assert "status" in result
             assert "response_type" in result
             assert "answer" in result
@@ -47,8 +47,8 @@ class TestPipelineOrchestrator:
     @pytest.mark.asyncio
     async def test_unexpected_error_returns_database_error(self):
         """Unexpected exceptions should return DATABASE_ERROR."""
-        with patch("ai_engine.services.query_router.route_query", side_effect=Exception("Unexpected")):
+        with patch("ai_engine.services.query_router.extract_intent_with_llm", side_effect=Exception("Unexpected")):
             from app.services.pipeline import run_pipeline
-            result = await run_pipeline(question="test question", language="vi")
+            result = await run_pipeline(question="test question")
             assert result["status"] == "error"
             assert result["metadata"]["error_code"] == "DATABASE_ERROR"

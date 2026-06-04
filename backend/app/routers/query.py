@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api/v1", tags=["query"])
 ERROR_HTTP_MAP = {
     "INVALID_QUESTION": 400,
     "CYPHER_GENERATION_FAILED": 422,
+    "LIGHTRAG_QUERY_FAILED": 500,
     "NO_DATA_FOUND": 404,
     "DATABASE_ERROR": 500,
     "MODEL_UNAVAILABLE": 503,
