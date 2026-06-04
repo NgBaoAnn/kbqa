@@ -43,38 +43,17 @@ PIPELINE_TIMEOUT_SECONDS = 120
 # The VietMedKG graph is served exclusively by the Cypher path.
 _LIGHTRAG_MODE = "naive"
 
-# User-facing messages per language
-_USER_MESSAGES = {
-    "vi": {
-        "invalid_question": "Vui lòng nhập câu hỏi hợp lệ.",
-        "model_unavailable": "Dịch vụ AI tạm thời không khả dụng. Vui lòng thử lại sau.",
-        "invalid_mode": "Chế độ truy vấn không hợp lệ.",
-        "generation_failed": "Xin lỗi, tôi chưa hiểu câu hỏi. Bạn có thể diễn đạt lại được không?",
-        "system_error": "Hệ thống đang gặp sự cố. Vui lòng thử lại sau.",
-        "timeout": "Xử lý mất quá lâu. Vui lòng thử câu hỏi ngắn hơn.",
-        "no_data": "Không tìm thấy thông tin về chủ đề này trong cơ sở dữ liệu.",
-    },
-    "en": {
-        "invalid_question": "Please enter a valid question.",
-        "model_unavailable": "AI service is temporarily unavailable. Please try again later.",
-        "invalid_mode": "Invalid query mode.",
-        "generation_failed": "Sorry, I didn't understand the question. Could you rephrase it?",
-        "system_error": "System is experiencing issues. Please try again later.",
-        "timeout": "Processing took too long. Please try a shorter question.",
-        "no_data": "No information found on this topic in the database.",
-    },
-}
-
-
-def _msg(language: str, key: str) -> str:
-    """Get user-facing message by language and key."""
-    lang = language if language in _USER_MESSAGES else "vi"
-    return _USER_MESSAGES[lang][key]
+MSG_INVALID_QUESTION = "Vui lòng nhập câu hỏi hợp lệ."
+MSG_MODEL_UNAVAILABLE = "Dịch vụ AI tạm thời không khả dụng. Vui lòng thử lại sau."
+MSG_INVALID_MODE = "Chế độ truy vấn không hợp lệ."
+MSG_GENERATION_FAILED = "Xin lỗi, tôi chưa hiểu câu hỏi. Bạn có thể diễn đạt lại được không?"
+MSG_SYSTEM_ERROR = "Hệ thống đang gặp sự cố. Vui lòng thử lại sau."
+MSG_TIMEOUT = "Xử lý mất quá lâu. Vui lòng thử câu hỏi ngắn hơn."
+MSG_NO_DATA = "Không tìm thấy thông tin về chủ đề này trong cơ sở dữ liệu."
 
 
 async def run_pipeline(
     question: str,
-    language: str = "vi",
     mode: str | None = None,
 ) -> dict[str, Any]:
     """Execute the Hybrid Medical QA pipeline (Phương án C).
@@ -87,7 +66,6 @@ async def run_pipeline(
 
     Args:
         question: The user's natural language question.
-        language: Desired response language ('vi' or 'en').
         mode: LightRAG query mode override. If set, forces LightRAG path.
 
     Returns:
@@ -100,7 +78,7 @@ async def run_pipeline(
     # ── Step 0: Wrap in timeout ────────────────────────────────────────────
     try:
         return await asyncio.wait_for(
-            _run_pipeline_inner(question, language, mode, start_time),
+            _run_pipeline_inner(question, mode, start_time),
             timeout=PIPELINE_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
@@ -109,14 +87,13 @@ async def run_pipeline(
         return format_error_response(
             error_code="TIMEOUT",
             error_message=f"Pipeline exceeded {PIPELINE_TIMEOUT_SECONDS}s timeout",
-            user_message=_msg(language, "timeout"),
+            user_message=MSG_TIMEOUT,
             execution_time_ms=elapsed_ms,
         )
 
 
 async def _run_pipeline_inner(
     question: str,
-    language: str,
     mode: str | None,
     start_time: float,
 ) -> dict[str, Any]:
@@ -136,7 +113,7 @@ async def _run_pipeline_inner(
         return format_error_response(
             error_code="INVALID_QUESTION",
             error_message="Question is empty or whitespace-only.",
-            user_message=_msg(language, "invalid_question"),
+            user_message=MSG_INVALID_QUESTION,
             execution_time_ms=elapsed_ms,
         )
 
@@ -144,7 +121,7 @@ async def _run_pipeline_inner(
         # ── Step 2: Force LightRAG when mode is explicitly set ────────────
         if mode:
             logger.info("Pipeline: mode='%s' explicitly set → LightRAG", mode)
-            return await _execute_lightrag_path(question, language, _LIGHTRAG_MODE, start_time)
+            return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
 
         # ── Step 3: Regex fast path intent extraction ─────────────────────
         query_type, entity = classify_cypher_intent(question)
@@ -170,7 +147,7 @@ async def _run_pipeline_inner(
         if query_type in _FIND_BY_TYPES:
             if not entity:
                 logger.info("Reverse type=%s but no keyword → LightRAG", query_type)
-                return await _execute_lightrag_path(question, language, _LIGHTRAG_MODE, start_time)
+                return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
             logger.info(
                 "Route → CYPHER (reverse type=%s keyword='%s' method=%s)",
                 query_type, entity, routing_method,
@@ -179,7 +156,6 @@ async def _run_pipeline_inner(
                 question=question,
                 disease_name=entity,
                 query_type=query_type,
-                language=language,
                 start_time=start_time,
                 exact=False,
             )
@@ -190,7 +166,6 @@ async def _run_pipeline_inner(
                 question=question,
                 disease_name=None,
                 query_type="count",
-                language=language,
                 start_time=start_time,
                 exact=False,
             )
@@ -198,7 +173,7 @@ async def _run_pipeline_inner(
         # ── Step 6: No entity identified → LIGHTRAG ───────────────────────
         if not entity:
             logger.info("No entity extracted → LightRAG (method=%s)", routing_method)
-            return await _execute_lightrag_path(question, language, _LIGHTRAG_MODE, start_time)
+            return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
 
         # ── Step 7: Data-driven check — is entity in KG? ──────────────────
         canonical, variants = await _disambiguate_entity(entity)
@@ -206,7 +181,7 @@ async def _run_pipeline_inner(
         if not variants:
             # KG has no record for this entity → auto-fallback to semantic path
             logger.info("Entity '%s' not in KG → LightRAG auto-fallback", entity)
-            return await _execute_lightrag_path(question, language, _LIGHTRAG_MODE, start_time)
+            return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
 
         if canonical is None:
             # Multiple candidates, no clear winner → ask user to narrow down
@@ -234,7 +209,6 @@ async def _run_pipeline_inner(
             question=question,
             disease_name=canonical,
             query_type=query_type,
-            language=language,
             start_time=start_time,
             exact=True,
         )
@@ -246,7 +220,7 @@ async def _run_pipeline_inner(
         return format_error_response(
             error_code="DATABASE_ERROR",
             error_message=str(e),
-            user_message=_msg(language, "system_error"),
+            user_message=MSG_SYSTEM_ERROR,
             execution_time_ms=elapsed_ms,
         )
 
@@ -300,7 +274,6 @@ async def _execute_cypher_path(
     question: str,
     disease_name: str | None,
     query_type: str | None,
-    language: str,
     start_time: float,
     exact: bool = False,
 ) -> dict[str, Any]:
@@ -311,7 +284,8 @@ async def _execute_cypher_path(
 
     Flow: Layer 1 (template) → Neo4j → Layer 3 (format)
     """
-    from ai_engine.services.cypher_query_builder import build_cypher_query, format_cypher_result_as_text
+    from ai_engine.services.cypher_query_builder import build_cypher_query
+    from ai_engine.utils.cypher_result_formatter import format_cypher_result_as_text
     from ai_engine.services.text2cypher import generate_cypher, synthesize_answer
     from ai_engine.utils.cypher_validator import validate_cypher
     from ai_engine.utils.response_formatter import format_error_response, format_lightrag_response
@@ -331,13 +305,13 @@ async def _execute_cypher_path(
             params = {}
         except Exception as e:
             logger.error("LLM Cypher generation failed: %s", e)
-            return await _execute_lightrag_path(question, language, _LIGHTRAG_MODE, start_time)
+            return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
 
     # ── Validate + Sanitize ────────────────────────────────────────────────
     is_valid, validation_error = validate_cypher(cypher)
     if not is_valid:
         logger.warning("Cypher validation failed: %s → LightRAG fallback", validation_error)
-        return await _execute_lightrag_path(question, language, _LIGHTRAG_MODE, start_time)
+        return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
 
     try:
         cypher = sanitize_cypher(cypher)
@@ -347,7 +321,7 @@ async def _execute_cypher_path(
         return format_error_response(
             error_code="CYPHER_GENERATION_FAILED",
             error_message=str(e),
-            user_message=_msg(language, "generation_failed"),
+            user_message=MSG_GENERATION_FAILED,
             execution_time_ms=elapsed_ms,
         )
 
@@ -356,13 +330,13 @@ async def _execute_cypher_path(
         records = await _neo4j_exec(cypher, params)
     except Exception as e:
         logger.error("Cypher execution failed: %s → LightRAG fallback", e)
-        return await _execute_lightrag_path(question, language, _LIGHTRAG_MODE, start_time)
+        return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
 
     elapsed_ms = (time.time() - start_time) * 1000
 
     if not records:
         logger.info("Cypher 0 records → LightRAG fallback")
-        return await _execute_lightrag_path(question, language, _LIGHTRAG_MODE, start_time)
+        return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
 
     # ── Layer 3: Format response ────────────────────────────────────────────
     if use_template:
@@ -371,9 +345,11 @@ async def _execute_cypher_path(
     else:
         # LLM synthesis for fallback queries (payload budget enforced inside synthesize_answer)
         try:
-            answer_text = await synthesize_answer(question, records, language)
+            answer_text = await synthesize_answer(question, records)
         except Exception:
             answer_text = str(records[:3])
+
+    # (Disclaimer appending moved to format_lightrag_response)
 
     response = format_lightrag_response(
         raw_answer=answer_text,
@@ -384,16 +360,10 @@ async def _execute_cypher_path(
     response["metadata"]["engine"] = "cypher_direct"
     response["metadata"]["cypher"] = cypher.strip()
 
-    # Table layout for list queries with 2+ rows
-    if use_template and query_type in (
-        "symptoms", "medicine", "treatment", "count",
-        "find_by_symptom", "find_by_medicine",
-        "find_by_nutrition_avoid", "find_by_nutrition_eat",
-        "find_by_prevention",
-    ):
+    if use_template:
         structured = _extract_structured_data(query_type, records)
-        if structured and len(structured) >= 2:
-            response["response_type"] = "table"
+        if structured:
+            # Always return structured data for frontend UI flexibility
             response["data"] = structured
             response["metadata"]["source_count"] = len(structured)
 
@@ -429,7 +399,6 @@ def _extract_structured_data(query_type: str, records: list[dict]) -> list[dict]
 
 async def _execute_lightrag_path(
     question: str,
-    language: str,
     mode: str | None,
     start_time: float,
 ) -> dict[str, Any]:
@@ -447,15 +416,10 @@ async def _execute_lightrag_path(
         format_lightrag_response,
     )
 
-    logger.info("LightRAG path: mode=%s, lang=%s", mode or "default", language)
-
-    # Prepend language instruction for English queries
-    effective_question = question
-    if language == "en":
-        effective_question = f"Please answer in English: {question}"
+    logger.info("LightRAG path: mode=%s", mode or "default")
 
     result = await lightrag_service.query(
-        question=effective_question,
+        question=question,
         mode=mode,
     )
 
@@ -469,21 +433,21 @@ async def _execute_lightrag_path(
             return format_error_response(
                 error_code="MODEL_UNAVAILABLE",
                 error_message=error_msg,
-                user_message=_msg(language, "model_unavailable"),
+                user_message=MSG_MODEL_UNAVAILABLE,
                 execution_time_ms=elapsed_ms,
             )
         elif "invalid query mode" in error_msg.lower():
             return format_error_response(
                 error_code="INVALID_QUESTION",
                 error_message=error_msg,
-                user_message=_msg(language, "invalid_mode"),
+                user_message=MSG_INVALID_MODE,
                 execution_time_ms=elapsed_ms,
             )
         else:
             return format_error_response(
                 error_code="CYPHER_GENERATION_FAILED",
                 error_message=error_msg,
-                user_message=_msg(language, "generation_failed"),
+                user_message=MSG_GENERATION_FAILED,
                 execution_time_ms=elapsed_ms,
             )
 

@@ -219,7 +219,7 @@ async def generate_cypher(question: str) -> str:
         raise ValueError(f"LLM generation failed: {e}") from e
 
 
-async def synthesize_answer(question: str, records: list[dict], language: str = "vi") -> str:
+async def synthesize_answer(question: str, records: list[dict]) -> str:
     """Synthesize a natural language answer from Cypher result records.
 
     Applies payload budget before sending to LLM to prevent context overflow.
@@ -227,11 +227,7 @@ async def synthesize_answer(question: str, records: list[dict], language: str = 
     logger.info("Synthesizing answer via LLM (records=%d)", len(records))
 
     if not records:
-        return (
-            "No information found in the structured database."
-            if language == "en"
-            else "Không tìm thấy thông tin trong cơ sở dữ liệu cấu trúc."
-        )
+        return "Không tìm thấy thông tin trong cơ sở dữ liệu cấu trúc."
 
     data_text, note = _prepare_records_for_llm(records)
 
@@ -239,7 +235,7 @@ async def synthesize_answer(question: str, records: list[dict], language: str = 
         "You are a helpful medical assistant. "
         "Use the provided JSON data to answer the user's question accurately. "
         "Do not invent information that is not in the JSON. "
-        f"Write the response in {'English' if language == 'en' else 'Vietnamese'}."
+        "Write the response in Vietnamese."
     )
 
     user_prompt = f"Question: {question}\n\nData:\n{data_text}"

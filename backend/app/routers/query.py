@@ -46,21 +46,19 @@ async def query_medical(request: QueryRequest) -> dict:
     """Handle medical QA queries.
 
     Args:
-        request: QueryRequest with question, language, and optional mode.
+        request: QueryRequest with question and optional mode.
 
     Returns:
         QueryResponse with answer, response_type, data, and metadata.
     """
     logger.info(
-        "Query received: question='%s', lang=%s, mode=%s",
+        "Query received: question='%s', mode=%s",
         request.question[:80],
-        request.language,
         request.mode,
     )
 
     result = await run_pipeline(
         question=request.question,
-        language=request.language,
         mode=request.mode,
     )
 

@@ -1,9 +1,7 @@
-export type Language = "vi" | "en";
 export type ResponseType = "text" | "table" | "warning";
 
 export interface QueryRequest {
   question: string;
-  language: Language;
 }
 
 export interface QueryMetadata {

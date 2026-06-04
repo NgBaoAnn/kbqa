@@ -15,11 +15,7 @@ from ai_engine.services.intent_classifier import (
 
 logger = logging.getLogger(__name__)
 
-# ── Medical disclaimer (always appended) ──────────────────────────────────
-DISCLAIMER_VI = (
-    "\n\nLưu ý: Thông tin chỉ mang tính chất tham khảo. "
-    "Vui lòng tham khảo ý kiến bác sĩ chuyên khoa."
-)
+from ai_engine.utils.ui_constants import MEDICAL_DISCLAIMER
 
 # ── Dangerous symptom keywords for warning detection ──────────────────────
 DANGER_KEYWORDS = [
@@ -168,7 +164,7 @@ def format_lightrag_response(
             "response_type": "text",
             "answer": (
                 "Không tìm thấy thông tin về chủ đề này trong cơ sở dữ liệu."
-                + DISCLAIMER_VI
+                + MEDICAL_DISCLAIMER
             ),
             "data": None,
             "metadata": {
@@ -192,12 +188,12 @@ def format_lightrag_response(
         data = extract_table_data(answer)
     else:
         # Ensure disclaimer is appended for text responses
-        if DISCLAIMER_VI.strip() not in answer:
-            answer += DISCLAIMER_VI
+        if MEDICAL_DISCLAIMER.strip() not in answer:
+            answer += MEDICAL_DISCLAIMER
 
     # For table type, also ensure disclaimer in the answer text
-    if response_type == "table" and DISCLAIMER_VI.strip() not in answer:
-        answer += DISCLAIMER_VI
+    if response_type == "table" and MEDICAL_DISCLAIMER.strip() not in answer:
+        answer += MEDICAL_DISCLAIMER
 
     return {
         "status": "success",
