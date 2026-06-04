@@ -44,7 +44,7 @@ class TestQueryValidation:
         """Empty question should return error response."""
         from backend.app.services.pipeline import run_pipeline
 
-        result = await run_pipeline(question="", language="vi")
+        result = await run_pipeline(question="")
         assert result["status"] == "error"
         assert result["metadata"]["error_code"] == "INVALID_QUESTION"
 
@@ -53,5 +53,5 @@ class TestQueryValidation:
         """Whitespace-only question should return error response."""
         from backend.app.services.pipeline import run_pipeline
 
-        result = await run_pipeline(question="   ", language="vi")
+        result = await run_pipeline(question="   ")
         assert result["status"] == "error"

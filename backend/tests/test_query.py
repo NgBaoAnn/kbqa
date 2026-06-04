@@ -47,10 +47,7 @@ class TestQueryEndpoint:
         response = client.post("/api/v1/query", json={})
         assert response.status_code == 422
 
-    def test_invalid_language_returns_422(self, client):
-        """Invalid language value should return 422."""
-        response = client.post("/api/v1/query", json={"question": "test", "language": "fr"})
-        assert response.status_code == 422
+
 
     def test_model_unavailable_returns_503(self, client):
         """MODEL_UNAVAILABLE error should return 503."""

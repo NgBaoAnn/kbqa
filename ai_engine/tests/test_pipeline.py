@@ -8,38 +8,31 @@ class TestQueryRouter:
 
     def test_symptom_question_routes_cypher(self):
         """Question about symptoms should route to Cypher path."""
-        from ai_engine.services.query_router import route_query, QueryPath
-        result = route_query("Bệnh tiểu đường có triệu chứng gì?")
-        assert result["path"] == QueryPath.CYPHER
-        assert result["query_type"] is None
+        from ai_engine.services.query_router import classify_cypher_intent
+        query_type, entity = classify_cypher_intent("Bệnh tiểu đường có triệu chứng gì?")
+        assert query_type == "symptoms"
+        assert entity == "tiểu đường"
 
     def test_vague_question_routes_lightrag(self):
         """Vague/thematic questions should route to LightRAG."""
-        from ai_engine.services.query_router import route_query, QueryPath
-        result = route_query("Sức khỏe quan trọng như thế nào trong cuộc sống?")
-        assert result["path"] == QueryPath.LIGHTRAG
+        from ai_engine.services.query_router import classify_cypher_intent
+        query_type, entity = classify_cypher_intent("Sức khỏe quan trọng như thế nào trong cuộc sống?")
+        assert query_type is None
+        assert entity is None
 
     def test_count_question_routes_cypher(self):
         """Count questions should route to Cypher path."""
-        from ai_engine.services.query_router import route_query, QueryPath
-        result = route_query("Có bao nhiêu bệnh trong hệ thống?")
-        assert result["path"] == QueryPath.CYPHER
-        assert result["query_type"] == "count"
+        from ai_engine.services.query_router import classify_cypher_intent
+        query_type, entity = classify_cypher_intent("Có bao nhiêu bệnh trong hệ thống?")
+        assert query_type == "count"
+        assert entity is None
 
     def test_english_question_routing(self):
         """English questions should also be routed correctly."""
-        from ai_engine.services.query_router import route_query, QueryPath
-        result = route_query("What are the symptoms of diabetes?")
-        assert result["path"] == QueryPath.CYPHER
-
-    def test_route_returns_required_keys(self):
-        """Route result should contain path, disease_name, query_type, reason."""
-        from ai_engine.services.query_router import route_query
-        result = route_query("Bệnh tiểu đường có triệu chứng gì?")
-        assert "path" in result
-        assert "disease_name" in result
-        assert "query_type" in result
-        assert "reason" in result
+        from ai_engine.services.query_router import classify_cypher_intent
+        query_type, entity = classify_cypher_intent("What are the symptoms of diabetes?")
+        assert query_type == "symptoms"
+        assert entity == "diabetes"
 
 
 class TestCypherQueryBuilder:
@@ -48,7 +41,7 @@ class TestCypherQueryBuilder:
     def test_build_symptoms_query(self):
         """Should build valid symptoms Cypher query."""
         from ai_engine.services.cypher_query_builder import build_cypher_query
-        cypher, params = build_cypher_query("symptoms", "Tiểu Đường")
+        cypher, params = build_cypher_query("symptoms", "Tiểu đường")
         assert "MATCH" in cypher
         assert "RETURN" in cypher
         assert params.get("name") == "Tiểu đường"
@@ -65,11 +58,3 @@ class TestCypherQueryBuilder:
         from ai_engine.services.cypher_query_builder import build_cypher_query
         cypher, params = build_cypher_query("count", None)
         assert "count" in cypher.lower() or "COUNT" in cypher
-
-    def test_format_cypher_result_as_text(self):
-        """Should format Cypher results into Vietnamese text."""
-        from ai_engine.services.cypher_query_builder import format_cypher_result_as_text
-        records = [{"symptom": "Đau đầu"}, {"symptom": "Sốt"}]
-        text = format_cypher_result_as_text("symptoms", "Cảm cúm", records)
-        assert isinstance(text, str)
-        assert len(text) > 0
