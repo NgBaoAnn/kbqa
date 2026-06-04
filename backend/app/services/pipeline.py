@@ -39,10 +39,11 @@ logger = logging.getLogger(__name__)
 # Naive Qdrant search + LLM synthesis can take up to ~90s on cold start.
 PIPELINE_TIMEOUT_SECONDS = 120
 
-# LightRAG semantic path uses local mode (entity + relationship vector search).
-# Requires lightrag_vdb_entities + lightrag_vdb_relationships to be populated in Qdrant.
+# LightRAG semantic path uses mix mode (entity + relationship + raw chunks).
+# mix = local (entities_vdb + Neo4j) + global (relationships_vdb + Neo4j)
+#       + vector chunks (chunks_vdb) — most comprehensive context.
 # The VietMedKG graph is served exclusively by the Cypher path.
-_LIGHTRAG_MODE = "local"
+_LIGHTRAG_MODE = "mix"
 
 # User-facing messages per language
 _USER_MESSAGES = {
