@@ -29,9 +29,13 @@ def _tiered_where(alias: str, exact: bool, carry: tuple[str, ...] = ()) -> str:
         exact:  When True, use equality match only — no scoring/sorting needed.
         carry:  Additional variables to carry through the WITH clause besides alias.
     """
-    if exact:
-        return f"WHERE {alias}.disease_name = $name\n        "
     carry_str = "".join(f", {v}" for v in carry)
+    if exact:
+        return (
+            f"WHERE {alias}.disease_name = $name\n"
+            f"        WITH {alias}{carry_str}\n"
+            f"        "
+        )
     return (
         f"WHERE toLower({alias}.disease_name) CONTAINS toLower($name)\n"
         f"        WITH {alias}{carry_str},\n"
