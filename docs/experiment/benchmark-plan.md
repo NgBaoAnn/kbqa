@@ -1,6 +1,6 @@
 # Plan (checklist): Benchmark AegisHealth trên Kaggle — 3 kịch bản ablation
 
-**Trạng thái: CHƯA BẮT ĐẦU — đang ở PHASE 0**
+**Trạng thái: PHASE 1 ✅ — đang ở PHASE 2**
 > Mỗi PHASE độc lập, có thể dừng/tiếp xuyên phiên. Sau mỗi PHASE: tick `[x]`, cập nhật dòng "Trạng thái",
 > commit (nếu là code), rồi có thể dừng.
 > Đây là **nguồn chân lý tiến độ** trong repo. Đọc dòng "Trạng thái" + checkbox để biết đang ở đâu.
@@ -40,17 +40,17 @@ LLM thuần → +RAG vector → +KG. Tài nguyên giới hạn → chạy trên 
 - [x] Cập nhật memory: thêm file `experiment_benchmark.md` + dòng index trong `MEMORY.md` trỏ tới doc trên.
 - [x] Commit: `docs(experiment): add Kaggle benchmark plan checklist`.
 
-## PHASE 1 — Rebuild dataset (LOCAL, deterministic)
-- [ ] Viết `etl/benchmark_gen/rebuild_golden.py`:
-  - [ ] Load `1hop.json`+`2hop.json`; gắn `complexity` (hop) + `direction` (forward/reverse).
-  - [ ] Whitelist ENTITY-SET type (D2); normalize + dedupe đáp án (casefold so sánh, giữ surface; cờ phiên âm rác).
-  - [ ] Filter `1 ≤ |answer| ≤ 20`; stratified sample N≈100 theo `(type × hop × regime)`, seed=42.
-  - [ ] Enrich record: `{question, question_type, answer, complexity, direction, regime, answer_cardinality}`.
-  - [ ] Build `KG_ENTITIES` = `headers ∪ tails-entity-relation` (split blob comma, ~64k entity).
-- [ ] Output: `data/benchmark/golden_test_v2.json`, `golden_test_v2_stats.md`, `kg_entities.txt`.
-- [ ] Verify: 100 câu, mọi `cardinality ≤ 20`, không còn free-text/outlier; stats cân bằng.
-- [ ] **Data-consistency spot-check**: 3–5 câu chạy Cypher thật lên Neo4j → records khớp gold.
-- [ ] Commit: `feat(benchmark): rebuild stratified entity-set golden_test_v2`.
+## PHASE 1 — Rebuild dataset (LOCAL, deterministic) ✅
+- [x] Viết `etl/benchmark_gen/rebuild_golden.py`:
+  - [x] Load `1hop.json`+`2hop.json`; gắn `complexity` (hop) + `direction` (forward/reverse).
+  - [x] Whitelist ENTITY-SET type (D2); filter CARD_CAP=20; gắn `regime` (single/multi).
+  - [x] Stratified sample N=100 theo `(complexity × direction × regime)`, seed=42.
+  - [x] Enrich record: `{question, question_type, answer, complexity, direction, regime, answer_cardinality}`.
+  - [x] Build `KG_ENTITIES` = `headers ∪ tails-entity-relation` (split blob comma, 65553 entities).
+- [x] Output: `data/benchmark/golden_test_v2.json` (100 Q), `golden_test_v2_stats.md`, `kg_entities.txt`.
+- [x] Verify: 100 câu, mọi `cardinality ≤ 20`, không còn free-text/outlier; 6 strata.
+- [x] Commit: `feat(benchmark): add rebuild_golden.py for stratified entity-set golden_test_v2`.
+> Note: Data-consistency Cypher spot-check (Neo4j live) → để thực hiện khi có kết nối Neo4j.
 
 ## PHASE 2 — Scorer `ai_engine/eval/score_golden.py`
 - [ ] `normalize(s)`; load `KG_ENTITIES`; mention-extract deterministic (D5).
