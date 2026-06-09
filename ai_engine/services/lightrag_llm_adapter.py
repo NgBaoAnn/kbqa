@@ -35,12 +35,18 @@ async def llm_model_func(
         messages.extend(history_messages)
     messages.append({"role": "user", "content": prompt})
 
+    # LightRAG passes max_new_tokens via kwargs to cap output length.
+    # Respect it when provided; otherwise use small defaults for 3B models:
+    # keyword_extraction needs ~256 tokens, synthesis ~512 is sufficient.
+    _default = 256 if keyword_extraction else 512
+    max_tokens = int(kwargs.get("max_new_tokens", _default))
+
     try:
         response = await client.chat.completions.create(
             model=LLM_MODEL_NAME,
             messages=messages,
             temperature=0.1 if keyword_extraction else 0.3,
-            max_tokens=2048,
+            max_tokens=max_tokens,
         )
         result = response.choices[0].message.content or ""
         logger.debug(

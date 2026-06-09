@@ -30,6 +30,7 @@ Dual-path pipeline:
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any
 
@@ -38,14 +39,12 @@ from app.config import DISABLE_CYPHER_PATH
 logger = logging.getLogger(__name__)
 
 # Pipeline-level timeout (seconds).
-# Naive Qdrant search + LLM synthesis can take up to ~90s on cold start.
-PIPELINE_TIMEOUT_SECONDS = 120
+# Worst case: intent extraction (~30s) + LightRAG mix synthesis (~78s) = ~110s.
+# Set to 240s to accommodate cold Ollama model starts and mix mode queries.
+PIPELINE_TIMEOUT_SECONDS = 240
 
-# LightRAG default mode for semantic fallback path.
-# naive = chỉ dùng text chunks, prompt nhỏ, ít timeout hơn mix.
-# Đổi thành "local"/"hybrid"/"mix" nếu cần context entity/relation đầy đủ hơn
-# (nhưng mix với 80 relations dễ vượt LLM timeout 60s trên Ollama).
-_LIGHTRAG_MODE = "naive"
+# LightRAG default mode — đọc từ DEFAULT_QUERY_MODE trong .env để config một chỗ duy nhất.
+_LIGHTRAG_MODE = os.getenv("DEFAULT_QUERY_MODE", "naive")
 
 MSG_INVALID_QUESTION = "Vui lòng nhập câu hỏi hợp lệ."
 MSG_MODEL_UNAVAILABLE = "Dịch vụ AI tạm thời không khả dụng. Vui lòng thử lại sau."
