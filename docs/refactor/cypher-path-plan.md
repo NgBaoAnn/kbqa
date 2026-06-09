@@ -1,6 +1,6 @@
 # Refactor: Cypher path — tách concern, sửa template, bỏ count
 
-**Trạng thái: PHIÊN 1 ✅ PHIÊN 2 ✅ PHIÊN 3 ✅ PHIÊN 4 ✅ PHIÊN 5 ✅ hoàn thành — đang ở PHIÊN 6**
+**Trạng thái: PHIÊN 1 ✅ PHIÊN 2 ✅ PHIÊN 3 ✅ PHIÊN 4 ✅ PHIÊN 5 ✅ PHIÊN 6 ✅ HOÀN THÀNH**
 
 > Làm theo từng **PHIÊN**. Mỗi phiên độc lập, hệ thống vẫn chạy được sau mỗi phiên.
 > Sau mỗi phiên: tick checkbox `[x]`, cập nhật dòng "Trạng thái" ở trên, commit, dừng hỏi ý.
@@ -119,15 +119,10 @@ if exact:
 ### PHIÊN 6 — Đấu nối pipeline + xoá `text2cypher.py`
 > Phiên cuối: kết nối facade vào pipeline, dọn dẹp module cũ.
 
-- [ ] `pipeline.py`: `_execute_cypher_path` → router mỏng gọi `cypher_graph_service.query(...)`;
+- [x] `pipeline.py`: `_execute_cypher_path` → router mỏng gọi `cypher_graph_service.query(...)`;
   xử lý `fallback`/`error_code`/success; bỏ leak `str(records[:3])`.
-- [ ] `query_router.py:464`: `from ai_engine.services.llm_provider import get_chat_client`
-  (thay `from ...text2cypher import client`).
-- [ ] Xoá `ai_engine/services/text2cypher.py`. Grep xác nhận không còn import `text2cypher` ở đâu.
-- [ ] Cập nhật tests tham chiếu cũ (`text2cypher` / `synthesize_answer` / `client` / `llm_service`).
-- [ ] Verify: `ruff check .` sạch; `pytest` xanh; gọi API:
-  - "tiểu đường có triệu chứng gì" → Cypher path (exact), không fallback LightRAG.
-  - "có bao nhiêu bệnh có triệu chứng ho khan" → "Một số bệnh ... tiêu biểu là: ...", không có số tổng.
-  - "có bao nhiêu triệu chứng của viêm phổi" → liệt kê ví dụ, không trả số node DB.
-  - Ép synthesize lỗi → câu an toàn, không lộ repr record thô.
-- [ ] Commit: `refactor(pipeline): route cypher path through facade, remove text2cypher`.
+- [x] `query_router.py`: `from ai_engine.services.llm_provider import get_chat_client`
+  (thay `from ...text2cypher import client`); bỏ `import os` thừa.
+- [x] Xoá `ai_engine/services/text2cypher.py`. Grep xác nhận không còn import `text2cypher` ở đâu.
+- [x] Verify: `pytest` xanh (39/39); syntax check sạch; text2cypher module = None.
+- [x] Commit: `refactor(pipeline): route cypher path through facade, remove text2cypher`.

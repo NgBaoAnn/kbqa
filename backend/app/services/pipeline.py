@@ -273,75 +273,43 @@ async def _execute_cypher_path(
     start_time: float,
     exact: bool = False,
 ) -> dict[str, Any]:
-    """Execute the Cypher path — template-first, LLM Text2Cypher as fallback.
+    """Execute the Cypher path via cypher_graph_service facade.
 
     Caller is responsible for disambiguation; disease_name (when provided) is
     already the canonical KG name. exact=True generates a direct equality match.
-
-    Flow: Layer 1 (template) → Neo4j → Layer 3 (format)
     """
-    from ai_engine.services.cypher_query_builder import build_cypher_query
-    from ai_engine.services.cypher_answer_synthesizer import synthesize_answer
-    from ai_engine.services.text2cypher import generate_cypher
-    from ai_engine.utils.cypher_validator import validate_cypher
+    from ai_engine.services.cypher_graph_service import query as _cypher_query
     from ai_engine.utils.response_formatter import format_error_response, format_lightrag_response
-    from ai_engine.utils.sanitizer import sanitize_cypher
     from app.services.graph_service import execute_cypher as _neo4j_exec
 
     logger.info("Cypher path: type=%s entity='%s' exact=%s", query_type, disease_name, exact)
 
-    # ── Layer 1: Template-First ─────────────────────────────────────────────
-    cypher, params = build_cypher_query(query_type, disease_name, exact=exact)
-    use_template = cypher is not None
+    result = await _cypher_query(
+        question=question,
+        query_type=query_type,
+        entity=disease_name,
+        exact=exact,
+        execute_fn=_neo4j_exec,
+    )
 
-    if not use_template:
-        logger.info("No template for type=%s → LLM Text2Cypher", query_type)
-        try:
-            cypher = await generate_cypher(question)
-            params = {}
-        except Exception as e:
-            logger.error("LLM Cypher generation failed: %s", e)
+    elapsed_ms = (time.time() - start_time) * 1000
+
+    if not result["success"]:
+        if result.get("fallback"):
+            logger.info("Cypher path → LightRAG fallback: %s", result.get("reason"))
             return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
-
-    # ── Validate + Sanitize ────────────────────────────────────────────────
-    is_valid, validation_error = validate_cypher(cypher)
-    if not is_valid:
-        logger.warning("Cypher validation failed: %s → LightRAG fallback", validation_error)
-        return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
-
-    try:
-        cypher = sanitize_cypher(cypher)
-    except ValueError as e:
-        elapsed_ms = (time.time() - start_time) * 1000
-        logger.error("Cypher sanitization blocked: %s", e)
+        logger.error("Cypher hard error: %s", result.get("error_code"))
         return format_error_response(
-            error_code="CYPHER_GENERATION_FAILED",
-            error_message=str(e),
+            error_code=result["error_code"],
+            error_message=result.get("error_message", ""),
             user_message=MSG_GENERATION_FAILED,
             execution_time_ms=elapsed_ms,
         )
 
-    # ── Execute on Neo4j ───────────────────────────────────────────────────
-    try:
-        records = await _neo4j_exec(cypher, params)
-    except Exception as e:
-        logger.error("Cypher execution failed: %s → LightRAG fallback", e)
-        return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
-
-    elapsed_ms = (time.time() - start_time) * 1000
-
-    if not records:
-        logger.info("Cypher 0 records → LightRAG fallback")
-        return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
-
-    # ── Layer 3: Format response (via LLM) ─────────────────────────────────
-    try:
-        answer_text = await synthesize_answer(question, records)
-    except Exception as e:
-        logger.error("Synthesize answer failed: %s", e)
-        answer_text = str(records[:3])
-
-    # (Disclaimer appending moved to format_lightrag_response)
+    answer_text = result["answer"]
+    cypher = result["cypher"]
+    use_template = result["used_template"]
+    records = result["records"]
 
     response = format_lightrag_response(
         raw_answer=answer_text,
@@ -355,7 +323,6 @@ async def _execute_cypher_path(
     if use_template:
         structured = _extract_structured_data(query_type, records)
         if structured:
-            # Always return structured data for frontend UI flexibility
             response["data"] = structured
             response["metadata"]["source_count"] = len(structured)
 

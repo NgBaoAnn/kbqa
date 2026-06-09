@@ -49,7 +49,6 @@ Thuật toán xác định (query_type, entity):
 
 import json
 import logging
-import os
 import re
 
 logger = logging.getLogger(__name__)
@@ -455,11 +454,12 @@ async def extract_intent_with_llm(question: str) -> tuple[str | None, str | None
     Returns (query_type, entity). Either or both may be None on failure.
     Never raises — logs warning and returns (None, None) on any error.
     """
-    from ai_engine.services.text2cypher import client as _llm_client
+    from ai_engine.config import LLM_MODEL_NAME
+    from ai_engine.services.llm_provider import get_chat_client
 
     try:
-        resp = await _llm_client.chat.completions.create(
-            model=os.environ.get("LLM_MODEL_NAME", "qwen2.5:7b"),
+        resp = await get_chat_client().chat.completions.create(
+            model=LLM_MODEL_NAME,
             messages=[
                 {"role": "system", "content": _INTENT_SYSTEM_PROMPT},
                 {"role": "user", "content": question},
