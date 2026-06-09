@@ -1,6 +1,6 @@
 # Plan (checklist): Benchmark AegisHealth trên Kaggle — 3 kịch bản ablation
 
-**Trạng thái: PHASE 1 ✅ — đang ở PHASE 2**
+**Trạng thái: PHASE 1 ✅ PHASE 2 ✅ — đang ở PHASE 3**
 > Mỗi PHASE độc lập, có thể dừng/tiếp xuyên phiên. Sau mỗi PHASE: tick `[x]`, cập nhật dòng "Trạng thái",
 > commit (nếu là code), rồi có thể dừng.
 > Đây là **nguồn chân lý tiến độ** trong repo. Đọc dòng "Trạng thái" + checkbox để biết đang ở đâu.
@@ -52,14 +52,14 @@ LLM thuần → +RAG vector → +KG. Tài nguyên giới hạn → chạy trên 
 - [x] Commit: `feat(benchmark): add rebuild_golden.py for stratified entity-set golden_test_v2`.
 > Note: Data-consistency Cypher spot-check (Neo4j live) → để thực hiện khi có kết nối Neo4j.
 
-## PHASE 2 — Scorer `ai_engine/eval/score_golden.py`
-- [ ] `normalize(s)`; load `KG_ENTITIES`; mention-extract deterministic (D5).
-- [ ] Metric chủ đạo (D4): fabrication/off-answer rate, precision, recall, F1, EM/Hits@1 theo regime.
-- [ ] Metric phụ (D6): BERTScore vs reference `", ".join(gold_clean)`.
-- [ ] `score_run(raw_jsonl, kg_entities) -> report dict` + breakdown theo regime/hop/type; abstention correctness.
-- [ ] Unit test (local, no GPU): 3 answer giả lập (đúng/bịa/rút-gọn) → fabrication 0/cao/0, precision hợp lý.
-- [ ] KG vocab test: 5 gold ∈ vocab, 5 chuỗi bịa ∉ vocab.
-- [ ] Commit: `feat(eval): add hallucination scorer score_golden`.
+## PHASE 2 — Scorer `ai_engine/eval/score_golden.py` ✅
+- [x] `normalize(s)` (NFC, lowercase, strip); load `KG_ENTITIES`.
+- [x] Mention extraction deterministic: bold phrases + bullets + pipes (strip `**` from list items).
+- [x] Metric chủ đạo (D4): fabrication rate, precision, recall, F1, off-answer rate, EM/Hits@1.
+- [x] Metric phụ (D6): BERTScore optional (`--bertscore` flag, falls back gracefully).
+- [x] `score_run(raw_jsonl, golden, kg) -> report` + breakdown by regime/complexity/type.
+- [x] 5 unit tests + integration test (đúng/bịa/prose/single/KG-vocab) — tất cả pass.
+- [x] Commit: `feat(eval): add hallucination scorer score_golden`.
 
 ## PHASE 3 — Ship data lên Kaggle
 - [ ] Tạo Kaggle Dataset `aegishealth-benchmark` chứa `golden_test_v2.json` + `kg_entities.txt`.
