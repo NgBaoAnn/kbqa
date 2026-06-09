@@ -30,20 +30,21 @@ Dual-path pipeline:
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any
+
+from app.config import DISABLE_CYPHER_PATH
 
 logger = logging.getLogger(__name__)
 
 # Pipeline-level timeout (seconds).
-# Naive Qdrant search + LLM synthesis can take up to ~90s on cold start.
-PIPELINE_TIMEOUT_SECONDS = 120
+# Worst case: intent extraction (~30s) + LightRAG mix synthesis (~78s) = ~110s.
+# Set to 240s to accommodate cold Ollama model starts and mix mode queries.
+PIPELINE_TIMEOUT_SECONDS = 240
 
-# LightRAG semantic path uses mix mode (entity + relationship + raw chunks).
-# mix = local (entities_vdb + Neo4j) + global (relationships_vdb + Neo4j)
-#       + vector chunks (chunks_vdb) — most comprehensive context.
-# The VietMedKG graph is served exclusively by the Cypher path.
-_LIGHTRAG_MODE = "mix"
+# LightRAG default mode — đọc từ DEFAULT_QUERY_MODE trong .env để config một chỗ duy nhất.
+_LIGHTRAG_MODE = os.getenv("DEFAULT_QUERY_MODE", "naive")
 
 MSG_INVALID_QUESTION = "Vui lòng nhập câu hỏi hợp lệ."
 MSG_MODEL_UNAVAILABLE = "Dịch vụ AI tạm thời không khả dụng. Vui lòng thử lại sau."
@@ -124,17 +125,18 @@ async def _run_pipeline_inner(
         )
 
     try:
-        # ── Step 2: Force LightRAG when mode is explicitly set ────────────
-        if mode:
-            logger.info("Pipeline: mode='%s' explicitly set → LightRAG", mode)
-            return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
+        # ── Step 2: Bypass Cypher khi flag bật toàn cục hoặc mode được set ──
+        if DISABLE_CYPHER_PATH or mode:
+            reason = "DISABLE_CYPHER_PATH" if DISABLE_CYPHER_PATH else f"mode='{mode}'"
+            logger.info("Pipeline: %s → LightRAG (bypass Cypher)", reason)
+            return await _execute_lightrag_path(question, mode or _LIGHTRAG_MODE, start_time)
 
         # ── Step 3: LLM Intent Extraction (Accuracy First) ──────────────────
         query_type, entity = await extract_intent_with_llm(question)
         routing_method = "llm"
 
         # ── Step 4: Regex fallback when LLM fails or misses entity ──────────
-        if entity is None and query_type != "count":
+        if entity is None:
             q_type_regex, entity_regex = classify_cypher_intent(question)
             if q_type_regex:
                 query_type = q_type_regex
@@ -166,22 +168,12 @@ async def _run_pipeline_inner(
                 exact=False,
             )
 
-        # ── Step 5: Count/statistics → always CYPHER, no entity needed ────
-        if query_type == "count":
-            return await _execute_cypher_path(
-                question=question,
-                disease_name=None,
-                query_type="count",
-                start_time=start_time,
-                exact=False,
-            )
-
-        # ── Step 6: No entity identified → LIGHTRAG ───────────────────────
+        # ── Step 5: No entity identified → LIGHTRAG ───────────────────────
         if not entity:
             logger.info("No entity extracted → LightRAG (method=%s)", routing_method)
             return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
 
-        # ── Step 7: Data-driven check — is entity in KG? ──────────────────
+        # ── Step 6: Data-driven check — is entity in KG? ──────────────────
         canonical, variants = await _disambiguate_entity(entity)
 
         if not variants:
@@ -206,7 +198,7 @@ async def _run_pipeline_inner(
                 execution_time_ms=elapsed_ms,
             )
 
-        # ── Step 8: Canonical found → CYPHER with exact match ─────────────
+        # ── Step 7: Canonical found → CYPHER with exact match ─────────────
         logger.info(
             "Route → CYPHER (type=%s entity='%s' method=%s)",
             query_type, canonical, routing_method,
@@ -283,74 +275,43 @@ async def _execute_cypher_path(
     start_time: float,
     exact: bool = False,
 ) -> dict[str, Any]:
-    """Execute the Cypher path — template-first, LLM Text2Cypher as fallback.
+    """Execute the Cypher path via cypher_graph_service facade.
 
     Caller is responsible for disambiguation; disease_name (when provided) is
     already the canonical KG name. exact=True generates a direct equality match.
-
-    Flow: Layer 1 (template) → Neo4j → Layer 3 (format)
     """
-    from ai_engine.services.cypher_query_builder import build_cypher_query
-    from ai_engine.services.text2cypher import generate_cypher, synthesize_answer
-    from ai_engine.utils.cypher_validator import validate_cypher
+    from ai_engine.services.cypher_graph_service import query as _cypher_query
     from ai_engine.utils.response_formatter import format_error_response, format_lightrag_response
-    from ai_engine.utils.sanitizer import sanitize_cypher
     from app.services.graph_service import execute_cypher as _neo4j_exec
 
     logger.info("Cypher path: type=%s entity='%s' exact=%s", query_type, disease_name, exact)
 
-    # ── Layer 1: Template-First ─────────────────────────────────────────────
-    cypher, params = build_cypher_query(query_type, disease_name, exact=exact)
-    use_template = cypher is not None
+    result = await _cypher_query(
+        question=question,
+        query_type=query_type,
+        entity=disease_name,
+        exact=exact,
+        execute_fn=_neo4j_exec,
+    )
 
-    if not use_template:
-        logger.info("No template for type=%s → LLM Text2Cypher", query_type)
-        try:
-            cypher = await generate_cypher(question)
-            params = {}
-        except Exception as e:
-            logger.error("LLM Cypher generation failed: %s", e)
+    elapsed_ms = (time.time() - start_time) * 1000
+
+    if not result["success"]:
+        if result.get("fallback"):
+            logger.info("Cypher path → LightRAG fallback: %s", result.get("reason"))
             return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
-
-    # ── Validate + Sanitize ────────────────────────────────────────────────
-    is_valid, validation_error = validate_cypher(cypher)
-    if not is_valid:
-        logger.warning("Cypher validation failed: %s → LightRAG fallback", validation_error)
-        return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
-
-    try:
-        cypher = sanitize_cypher(cypher)
-    except ValueError as e:
-        elapsed_ms = (time.time() - start_time) * 1000
-        logger.error("Cypher sanitization blocked: %s", e)
+        logger.error("Cypher hard error: %s", result.get("error_code"))
         return format_error_response(
-            error_code="CYPHER_GENERATION_FAILED",
-            error_message=str(e),
+            error_code=result["error_code"],
+            error_message=result.get("error_message", ""),
             user_message=MSG_GENERATION_FAILED,
             execution_time_ms=elapsed_ms,
         )
 
-    # ── Execute on Neo4j ───────────────────────────────────────────────────
-    try:
-        records = await _neo4j_exec(cypher, params)
-    except Exception as e:
-        logger.error("Cypher execution failed: %s → LightRAG fallback", e)
-        return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
-
-    elapsed_ms = (time.time() - start_time) * 1000
-
-    if not records:
-        logger.info("Cypher 0 records → LightRAG fallback")
-        return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
-
-    # ── Layer 3: Format response (via LLM) ─────────────────────────────────
-    try:
-        answer_text = await synthesize_answer(question, records)
-    except Exception as e:
-        logger.error("Synthesize answer failed: %s", e)
-        answer_text = str(records[:3])
-
-    # (Disclaimer appending moved to format_lightrag_response)
+    answer_text = result["answer"]
+    cypher = result["cypher"]
+    use_template = result["used_template"]
+    records = result["records"]
 
     response = format_lightrag_response(
         raw_answer=answer_text,
@@ -364,7 +325,6 @@ async def _execute_cypher_path(
     if use_template:
         structured = _extract_structured_data(query_type, records)
         if structured:
-            # Always return structured data for frontend UI flexibility
             response["data"] = structured
             response["metadata"]["source_count"] = len(structured)
 
@@ -379,10 +339,6 @@ def _extract_structured_data(query_type: str, records: list[dict]) -> list[dict]
     """Extract structured data from Cypher results for table rendering."""
     if not records:
         return None
-
-    if query_type == "count":
-        # Count results → already structured
-        return [records[0]]
 
     # For other types, extract key fields
     data = []

@@ -24,7 +24,6 @@ Hybrid Architecture:
 Thuật toán xác định (query_type, entity):
 
   BƯỚC 1 — regex fast path (classify_cypher_intent):
-    count patterns → ("count", None)
     FORWARD patterns → (type, _clean_entity(group))
       type ∈ {symptoms, medicine, treatment, advice,
                prevention, department, profile}
@@ -37,12 +36,11 @@ Thuật toán xác định (query_type, entity):
     No match → (None, None)
 
   BƯỚC 2 — LLM fallback (extract_intent_with_llm):
-    Called only when entity is None and type != "count".
+    Called only when entity is None.
     Returns JSON {query_type, entity}; errors return (None, None).
     routing_method updated to "llm" whenever LLM is invoked.
 
   BƯỚC 3 — Pipeline routing (pipeline.py):
-    type == "count"         → CYPHER (no entity needed)
     type ∈ _FIND_BY_TYPES   → CYPHER (entity = keyword, CONTAINS, no disambiguation)
     entity is None          → LIGHTRAG
     entity found in KG      → CYPHER (exact=True, after disambiguation)
@@ -51,7 +49,6 @@ Thuật toán xác định (query_type, entity):
 
 import json
 import logging
-import os
 import re
 
 logger = logging.getLogger(__name__)
@@ -63,17 +60,6 @@ class QueryPath:
     LIGHTRAG = "lightrag"   # LightRAG graph-enhanced retrieval
 
 
-# Count/statistics patterns
-COUNT_PATTERNS = [
-    r"bao nhiêu\s+(?:bệnh|triệu chứng|thuốc)",
-    r"tổng\s+(?:số|cộng)\s+(?:bệnh|triệu chứng|thuốc)",
-    r"how many\s+(?:diseases?|symptoms?|drugs?|medicines?)",
-    r"(?:count|total)\s+(?:of\s+)?(?:diseases?|symptoms?|drugs?)",
-    r"top\s+\d+",
-    r"thống kê",
-]
-
-
 _QUESTION_WORDS: frozenset[str] = frozenset({
     "gì", "nào", "sao", "thế nào", "như thế nào",
     "bao nhiêu", "khi nào", "ở đâu",
@@ -83,7 +69,7 @@ _QUESTION_WORDS: frozenset[str] = frozenset({
 _VALID_QUERY_TYPES: frozenset[str] = frozenset({
     # Forward (entity = disease name)
     "symptoms", "medicine", "treatment", "advice",
-    "prevention", "department", "profile", "count",
+    "prevention", "department", "profile",
     "linked_diseases",
     # Reverse (entity = constraint keyword, not a disease name)
     "find_by_symptom", "find_by_medicine",
@@ -134,24 +120,22 @@ def classify_cypher_intent(question: str) -> tuple[str | None, str | None]:
     if re.search(r"\[[^\]]+,[^\]]+,[^\]]+", q):
         return None, None
 
-    # Count — entity not needed
-    for pattern in COUNT_PATTERNS:
-        if re.search(pattern, q.lower()):
-            return "count", None
-
     # Reverse: find_by_symptom — checked BEFORE forward symptom patterns to prevent
     # "bệnh nào có triệu chứng X" from being captured by the forward "triệu chứng..." pattern.
+    # Also catches "bao nhiêu bệnh có triệu chứng X" — returns representative examples, not a count.
     for pattern in [
         r"bệnh\s+(?:lý\s+)?(?:nào|gì)\s+(?:có|gây|biểu\s+hiện\s+bằng)\s+(?:triệu\s*chứng|biểu\s+hiện|dấu\s+hiệu)\s+(.+?)(?:\?|$)",
         r"(?:triệu\s*chứng|biểu\s+hiện|dấu\s+hiệu)\s+(.+?)\s+(?:là|thuộc)\s+bệnh\s+(?:gì|nào)",
         r"which\s+diseases?\s+(?:has|have|cause[sd]?)\s+(.+?)\s+(?:as\s+)?(?:symptom|sign)",
+        r"bao\s+nhiêu\s+bệnh\s+(?:lý\s+)?(?:có|gây)\s+(?:triệu\s*chứng|biểu\s+hiện|dấu\s+hiệu)\s+(.+?)(?:\?|$)",
     ]:
         m = re.search(pattern, q, re.IGNORECASE)
         if m:
             return "find_by_symptom", _clean_entity(m.group(1))
 
     # Symptoms — "entity có triệu chứng" patterns must precede "triệu chứng của entity"
-    # to avoid lazy capture grabbing question words like "gì" (R1 fix)
+    # to avoid lazy capture grabbing question words like "gì" (R1 fix).
+    # "bao nhiêu triệu chứng của X" → symptoms type; synthesizer lists them, does not count.
     for pattern in [
         r"(.+?)\s+có\s+(?:những\s+)?triệu\s*chứng\s+(?:gì|nào)",
         r"triệu chứng\s+(?:của\s+)?(?:bệnh\s+)?(.+?)(?:\s+là|\s+gồm|\?|$)",
@@ -159,6 +143,7 @@ def classify_cypher_intent(question: str) -> tuple[str | None, str | None]:
         r"dấu hiệu\s+(?:của\s+)?(?:bệnh\s+)?(.+?)(?:\?|$)",
         r"symptoms?\s+of\s+(.+?)(?:\?|$)",
         r"signs?\s+of\s+(.+?)(?:\?|$)",
+        r"bao\s+nhiêu\s+triệu\s*chứng\s+(?:của\s+)?(?:bệnh\s+)?(.+?)(?:\?|$)",
     ]:
         m = re.search(pattern, q, re.IGNORECASE)
         if m:
@@ -325,7 +310,6 @@ Forward (entity = Vietnamese disease name; null if irrelevant):
   prevention      — user wants how to prevent disease X
   department      — user wants which medical department treats disease X
   profile         — user wants overview / "what is" disease X
-  count           — counting/statistics (entity = null)
 
 Reverse (entity = constraint keyword, NOT a disease name):
   find_by_symptom         — "which disease has symptom X" (Symptom.disease_symptom)
@@ -346,7 +330,7 @@ Sentinel:
 - Reverse: entity = ONE short keyword (1–4 words). If user gives a list like
   "[A, B, C, D]", pick the most specific ONE. If picking one would lose key
   meaning → query_type="unknown", entity=null.
-- count, unknown: entity = null.
+- unknown: entity = null.
 
 # Output
 ONLY a JSON object, no markdown, no explanation:
@@ -426,8 +410,17 @@ A: {"query_type": "linked_diseases", "entity": "viêm phổi"}
 Q: "bệnh nào đi kèm với tiểu đường"
 A: {"query_type": "linked_diseases", "entity": "tiểu đường"}
 
-Q: "bao nhiêu bệnh trong cơ sở dữ liệu"
-A: {"query_type": "count", "entity": null}
+Q: "có bao nhiêu bệnh có triệu chứng ho khan"
+A: {"query_type": "find_by_symptom", "entity": "ho khan"}
+
+Q: "bao nhiêu bệnh gây triệu chứng sốt cao"
+A: {"query_type": "find_by_symptom", "entity": "sốt cao"}
+
+Q: "có bao nhiêu triệu chứng của viêm phổi"
+A: {"query_type": "symptoms", "entity": "viêm phổi"}
+
+Q: "thống kê bệnh trong cơ sở dữ liệu"
+A: {"query_type": "unknown", "entity": null}
 
 Q: "Việc tránh ăn [Dưa chua khô, Bia, Rượu trắng, Trứng cút] có thể hỗ trợ điều trị bệnh lý nào?"
 A: {"query_type": "unknown", "entity": null}
@@ -461,11 +454,12 @@ async def extract_intent_with_llm(question: str) -> tuple[str | None, str | None
     Returns (query_type, entity). Either or both may be None on failure.
     Never raises — logs warning and returns (None, None) on any error.
     """
-    from ai_engine.services.text2cypher import client as _llm_client
+    from ai_engine.config import LLM_MODEL_NAME
+    from ai_engine.services.llm_provider import get_chat_client
 
     try:
-        resp = await _llm_client.chat.completions.create(
-            model=os.environ.get("LLM_MODEL_NAME", "qwen2.5:7b"),
+        resp = await get_chat_client().chat.completions.create(
+            model=LLM_MODEL_NAME,
             messages=[
                 {"role": "system", "content": _INTENT_SYSTEM_PROMPT},
                 {"role": "user", "content": question},

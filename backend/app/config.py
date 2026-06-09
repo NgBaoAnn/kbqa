@@ -27,5 +27,10 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 # ── Rate Limiting ─────────────────────────────────────────────────────────
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
 
+# ── Testing / Debug ───────────────────────────────────────────────────────
+# Khi true, MỌI câu hỏi bỏ qua Cypher path, đi thẳng LightRAG.
+# Dùng để cô lập và đánh giá chất lượng retrieval của LightRAG.
+DISABLE_CYPHER_PATH = os.getenv("DISABLE_CYPHER_PATH", "false").lower() == "true"
+
 # ── API Version ───────────────────────────────────────────────────────────
 API_VERSION = "1.0.0"
