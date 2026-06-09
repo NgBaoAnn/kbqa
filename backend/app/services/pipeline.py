@@ -33,17 +33,19 @@ import logging
 import time
 from typing import Any
 
+from app.config import DISABLE_CYPHER_PATH
+
 logger = logging.getLogger(__name__)
 
 # Pipeline-level timeout (seconds).
 # Naive Qdrant search + LLM synthesis can take up to ~90s on cold start.
 PIPELINE_TIMEOUT_SECONDS = 120
 
-# LightRAG semantic path uses mix mode (entity + relationship + raw chunks).
-# mix = local (entities_vdb + Neo4j) + global (relationships_vdb + Neo4j)
-#       + vector chunks (chunks_vdb) — most comprehensive context.
-# The VietMedKG graph is served exclusively by the Cypher path.
-_LIGHTRAG_MODE = "mix"
+# LightRAG default mode for semantic fallback path.
+# naive = chỉ dùng text chunks, prompt nhỏ, ít timeout hơn mix.
+# Đổi thành "local"/"hybrid"/"mix" nếu cần context entity/relation đầy đủ hơn
+# (nhưng mix với 80 relations dễ vượt LLM timeout 60s trên Ollama).
+_LIGHTRAG_MODE = "naive"
 
 MSG_INVALID_QUESTION = "Vui lòng nhập câu hỏi hợp lệ."
 MSG_MODEL_UNAVAILABLE = "Dịch vụ AI tạm thời không khả dụng. Vui lòng thử lại sau."
@@ -124,10 +126,11 @@ async def _run_pipeline_inner(
         )
 
     try:
-        # ── Step 2: Force LightRAG when mode is explicitly set ────────────
-        if mode:
-            logger.info("Pipeline: mode='%s' explicitly set → LightRAG", mode)
-            return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
+        # ── Step 2: Bypass Cypher khi flag bật toàn cục hoặc mode được set ──
+        if DISABLE_CYPHER_PATH or mode:
+            reason = "DISABLE_CYPHER_PATH" if DISABLE_CYPHER_PATH else f"mode='{mode}'"
+            logger.info("Pipeline: %s → LightRAG (bypass Cypher)", reason)
+            return await _execute_lightrag_path(question, mode or _LIGHTRAG_MODE, start_time)
 
         # ── Step 3: LLM Intent Extraction (Accuracy First) ──────────────────
         query_type, entity = await extract_intent_with_llm(question)
