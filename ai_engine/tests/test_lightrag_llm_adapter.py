@@ -1,4 +1,4 @@
-"""Tests for ai_engine/services/llm_service.py."""
+"""Tests for ai_engine/services/lightrag_llm_adapter.py."""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -23,8 +23,8 @@ class TestLLMClient:
     @pytest.mark.asyncio
     async def test_check_llm_availability_connection_error(self):
         """LLM availability check should return False on connection error."""
-        from ai_engine.services.llm_service import check_llm_availability
-        with patch("ai_engine.services.llm_service._get_llm_client") as mock_client:
+        from ai_engine.services.lightrag_llm_adapter import check_llm_availability
+        with patch("ai_engine.services.lightrag_llm_adapter._get_llm_client") as mock_client:
             mock_instance = MagicMock()
             mock_instance.models = MagicMock()
             mock_instance.models.list = AsyncMock(side_effect=Exception("Connection refused"))
@@ -35,8 +35,8 @@ class TestLLMClient:
     @pytest.mark.asyncio
     async def test_check_embedding_availability_connection_error(self):
         """Embedding availability check should return False on connection error."""
-        from ai_engine.services.llm_service import check_embedding_availability
-        with patch("ai_engine.services.llm_service._get_embedding_client") as mock_client:
+        from ai_engine.services.lightrag_llm_adapter import check_embedding_availability
+        with patch("ai_engine.services.lightrag_llm_adapter._get_embedding_client") as mock_client:
             mock_instance = MagicMock()
             mock_instance.models = MagicMock()
             mock_instance.models.list = AsyncMock(side_effect=Exception("Connection refused"))
@@ -47,12 +47,12 @@ class TestLLMClient:
     @pytest.mark.asyncio
     async def test_llm_model_func_returns_string(self):
         """LLM model function should return a string response."""
-        from ai_engine.services.llm_service import llm_model_func
+        from ai_engine.services.lightrag_llm_adapter import llm_model_func
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Test response"
 
-        with patch("ai_engine.services.llm_service._get_llm_client") as mock_client:
+        with patch("ai_engine.services.lightrag_llm_adapter._get_llm_client") as mock_client:
             mock_instance = MagicMock()
             mock_instance.chat = MagicMock()
             mock_instance.chat.completions = MagicMock()
@@ -66,7 +66,7 @@ class TestLLMClient:
     async def test_embedding_func_returns_ndarray(self):
         """Embedding function should return numpy array with correct dimensions."""
         import numpy as np
-        from ai_engine.services.llm_service import embedding_func
+        from ai_engine.services.lightrag_llm_adapter import embedding_func
         from ai_engine.config import EMBEDDING_DIM
 
         mock_embedding = MagicMock()
@@ -74,7 +74,7 @@ class TestLLMClient:
         mock_response = MagicMock()
         mock_response.data = [mock_embedding]
 
-        with patch("ai_engine.services.llm_service._get_embedding_client") as mock_client:
+        with patch("ai_engine.services.lightrag_llm_adapter._get_embedding_client") as mock_client:
             mock_instance = MagicMock()
             mock_instance.embeddings = MagicMock()
             mock_instance.embeddings.create = AsyncMock(return_value=mock_response)

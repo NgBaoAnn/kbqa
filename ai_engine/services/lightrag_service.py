@@ -163,7 +163,7 @@ async def _create_lightrag_instance():
     _clear_stale_llm_cache(working_dir)
 
     # Import the LLM/embedding wrapper functions from our service
-    from ai_engine.services.llm_service import embedding_func, llm_model_func
+    from ai_engine.services.lightrag_llm_adapter import embedding_func, llm_model_func
 
     # model_name is required by QdrantVectorDBStorage to generate the
     # correct collection name suffix (e.g. lightrag_vdb_chunks_bge_m3_1024d).
@@ -311,7 +311,7 @@ async def health_check() -> dict[str, Any]:
     }
 
     # Check LLM
-    from ai_engine.services.llm_service import (
+    from ai_engine.services.lightrag_llm_adapter import (
         check_embedding_availability,
         check_llm_availability,
     )

@@ -1,6 +1,6 @@
 # Refactor: Cypher path — tách concern, sửa template, bỏ count
 
-**Trạng thái: PHIÊN 1 ✅ PHIÊN 2 ✅ hoàn thành — đang ở PHIÊN 3**
+**Trạng thái: PHIÊN 1 ✅ PHIÊN 2 ✅ PHIÊN 3 ✅ hoàn thành — đang ở PHIÊN 4**
 
 > Làm theo từng **PHIÊN**. Mỗi phiên độc lập, hệ thống vẫn chạy được sau mỗi phiên.
 > Sau mỗi phiên: tick checkbox `[x]`, cập nhật dòng "Trạng thái" ở trên, commit, dừng hỏi ý.
@@ -74,14 +74,14 @@ if exact:
 ### PHIÊN 3 — Tầng transport `llm_provider.py` + đổi tên adapter LightRAG
 > Tách "dựng client" ra khỏi "dùng client" để Cypher path và LightRAG path không phụ thuộc lẫn nhau.
 
-- [ ] Tạo `ai_engine/services/llm_provider.py`: `get_chat_client()`, `get_embedding_client()` lazy singleton,
+- [x] Tạo `ai_engine/services/llm_provider.py`: `get_chat_client()`, `get_embedding_client()` lazy singleton,
   đọc `ai_engine.config` (không đọc `os.environ`).
-- [ ] Đổi tên `llm_service.py` → `lightrag_llm_adapter.py`; sửa `_get_llm_client()/_get_embedding_client()`
+- [x] Đổi tên `llm_service.py` → `lightrag_llm_adapter.py`; sửa `_get_llm_client()/_get_embedding_client()`
   ủy quyền cho `llm_provider`. Giữ nguyên `llm_model_func`, `embedding_func`, health check.
-- [ ] Cập nhật mọi import `ai_engine.services.llm_service` → `...lightrag_llm_adapter`
+- [x] Cập nhật mọi import `ai_engine.services.llm_service` → `...lightrag_llm_adapter`
   (`lightrag_service.py`, health check, `main`, tests).
-- [ ] Verify: `pytest`; health check LLM + 1 query LightRAG → hành vi không đổi.
-- [ ] Commit: `refactor(llm): extract llm_provider transport, rename llm_service → lightrag_llm_adapter`.
+- [x] Verify: `pytest`; health check LLM + 1 query LightRAG → hành vi không đổi.
+- [x] Commit: `refactor(llm): extract llm_provider transport, rename llm_service → lightrag_llm_adapter`.
 
 ---
 
