@@ -20,12 +20,19 @@ class TestQueryRouter:
         assert query_type is None
         assert entity is None
 
-    def test_count_question_routes_cypher(self):
-        """Count questions should route to Cypher path."""
+    def test_count_question_no_entity_routes_lightrag(self):
+        """Count questions with no disease entity route to LightRAG (no Cypher path)."""
         from ai_engine.services.query_router import classify_cypher_intent
         query_type, entity = classify_cypher_intent("Có bao nhiêu bệnh trong hệ thống?")
-        assert query_type == "count"
+        assert query_type is None
         assert entity is None
+
+    def test_count_question_with_entity_routes_representative(self):
+        """Count questions with a disease entity route to representative examples."""
+        from ai_engine.services.query_router import classify_cypher_intent
+        query_type, entity = classify_cypher_intent("có bao nhiêu triệu chứng của viêm phổi")
+        assert query_type == "symptoms"
+        assert entity == "viêm phổi"
 
     def test_english_question_routing(self):
         """English questions should also be routed correctly."""
@@ -53,8 +60,8 @@ class TestCypherQueryBuilder:
         assert "MATCH" in cypher
         assert "Medicine" in cypher or "IS_PRESCRIBED" in cypher
 
-    def test_build_count_query(self):
-        """Should build valid count Cypher query."""
+    def test_build_count_query_returns_none(self):
+        """count query_type was removed — builder should return None."""
         from ai_engine.services.cypher_query_builder import build_cypher_query
         cypher, params = build_cypher_query("count", None)
-        assert "count" in cypher.lower() or "COUNT" in cypher
+        assert cypher is None

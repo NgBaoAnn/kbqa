@@ -281,7 +281,8 @@ async def _execute_cypher_path(
     Flow: Layer 1 (template) → Neo4j → Layer 3 (format)
     """
     from ai_engine.services.cypher_query_builder import build_cypher_query
-    from ai_engine.services.text2cypher import generate_cypher, synthesize_answer
+    from ai_engine.services.cypher_answer_synthesizer import synthesize_answer
+    from ai_engine.services.text2cypher import generate_cypher
     from ai_engine.utils.cypher_validator import validate_cypher
     from ai_engine.utils.response_formatter import format_error_response, format_lightrag_response
     from ai_engine.utils.sanitizer import sanitize_cypher

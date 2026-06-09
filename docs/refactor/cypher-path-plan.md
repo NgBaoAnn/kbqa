@@ -1,6 +1,6 @@
 # Refactor: Cypher path — tách concern, sửa template, bỏ count
 
-**Trạng thái: PHIÊN 1 ✅ PHIÊN 2 ✅ PHIÊN 3 ✅ hoàn thành — đang ở PHIÊN 4**
+**Trạng thái: PHIÊN 1 ✅ PHIÊN 2 ✅ PHIÊN 3 ✅ PHIÊN 4 ✅ hoàn thành — đang ở PHIÊN 5**
 
 > Làm theo từng **PHIÊN**. Mỗi phiên độc lập, hệ thống vẫn chạy được sau mỗi phiên.
 > Sau mỗi phiên: tick checkbox `[x]`, cập nhật dòng "Trạng thái" ở trên, commit, dừng hỏi ý.
@@ -89,14 +89,14 @@ if exact:
 > `text2cypher.py` hiện chứa cả "sinh Cypher" lẫn "tạo câu trả lời end-user" — vi phạm SRP.
 > Phiên này tách phần synthesizer, `text2cypher.py` tạm giữ (chưa xoá).
 
-- [ ] Tạo `ai_engine/services/cypher_answer_synthesizer.py`: chuyển `synthesize_answer` + toàn bộ helper
+- [x] Tạo `ai_engine/services/cypher_answer_synthesizer.py`: chuyển `synthesize_answer` + toàn bộ helper
   (`_prepare_records_for_llm`, `_KEY_LABELS`, `_BLOB_FIELDS`, `_clean_category`, `_split_blob`,
   `_strip_trailing_commentary`, `_TRAILING_JUNK_*`, `_MAX_*`) từ `text2cypher.py`; dùng `llm_provider.get_chat_client()`.
-- [ ] Thêm rule liệt kê/đếm vào `system_prompt`:
+- [x] Thêm rule liệt kê/đếm vào `system_prompt`:
   "TUYỆT ĐỐI không nêu tổng số. Câu đếm/liệt kê → chỉ nêu một số ví dụ, mở đầu 'Một số ... tiêu biểu là:'."
-- [ ] Sửa nhánh `except synthesize_answer`: thay `return str(records[:3])` bằng câu an toàn + log ERROR.
-- [ ] Verify: import module mới thành công; `pytest` xanh.
-- [ ] Commit: `refactor(cypher): extract cypher_answer_synthesizer with no-count rule + safe fallback`.
+- [x] Sửa nhánh `except synthesize_answer`: thay `return str(records[:3])` bằng câu an toàn + log ERROR.
+- [x] Verify: import module mới thành công; `pytest` xanh.
+- [x] Commit: `refactor(cypher): extract cypher_answer_synthesizer with no-count rule + safe fallback`.
 
 ---
 
