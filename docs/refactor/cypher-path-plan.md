@@ -1,6 +1,6 @@
 # Refactor: Cypher path — tách concern, sửa template, bỏ count
 
-**Trạng thái: PHIÊN 1 ✅ PHIÊN 2 ✅ PHIÊN 3 ✅ PHIÊN 4 ✅ hoàn thành — đang ở PHIÊN 5**
+**Trạng thái: PHIÊN 1 ✅ PHIÊN 2 ✅ PHIÊN 3 ✅ PHIÊN 4 ✅ PHIÊN 5 ✅ hoàn thành — đang ở PHIÊN 6**
 
 > Làm theo từng **PHIÊN**. Mỗi phiên độc lập, hệ thống vẫn chạy được sau mỗi phiên.
 > Sau mỗi phiên: tick checkbox `[x]`, cập nhật dòng "Trạng thái" ở trên, commit, dừng hỏi ý.
@@ -103,16 +103,16 @@ if exact:
 ### PHIÊN 5 — Gộp sinh Cypher vào builder + facade `cypher_graph_service.py`
 > Gộp `generate_cypher` + `SCHEMA_PROMPT` vào `cypher_query_builder.py`; tạo facade symmetric LightRAG.
 
-- [ ] `cypher_query_builder.py`: hấp thụ `generate_cypher` + `SCHEMA_PROMPT` từ `text2cypher.py`
+- [x] `cypher_query_builder.py`: hấp thụ `generate_cypher` + `SCHEMA_PROMPT` từ `text2cypher.py`
   (xoá few-shot count + mệnh đề "(except count queries)" trong SCHEMA_PROMPT);
   thêm `async def to_cypher(query_type, entity, exact, question) -> tuple[str, dict, bool]`;
   dùng `llm_provider.get_chat_client()`.
-- [ ] Tạo `ai_engine/services/cypher_graph_service.py`: `async def query(...) -> dict`
+- [x] Tạo `ai_engine/services/cypher_graph_service.py`: `async def query(...) -> dict`
   đóng gói `to_cypher → validate_cypher → sanitize_cypher → execute_cypher → synthesize_answer`.
   Trả: `{success, answer, records, cypher, used_template}` hoặc `{success:False, fallback:True, reason}`
   hoặc `{success:False, fallback:False, error_code:"CYPHER_GENERATION_FAILED"}`.
-- [ ] Verify: unit test `to_cypher()` (template hit + LLM fallback) và `cypher_graph_service.query()` xanh.
-- [ ] Commit: `refactor(cypher): merge text2cypher into builder + add cypher_graph_service facade`.
+- [x] Verify: unit test `to_cypher()` (template hit + LLM fallback) và `cypher_graph_service.query()` xanh.
+- [x] Commit: `refactor(cypher): merge text2cypher into builder + add cypher_graph_service facade`.
 
 ---
 
