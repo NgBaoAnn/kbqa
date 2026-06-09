@@ -134,7 +134,7 @@ async def _run_pipeline_inner(
         routing_method = "llm"
 
         # ── Step 4: Regex fallback when LLM fails or misses entity ──────────
-        if entity is None and query_type != "count":
+        if entity is None:
             q_type_regex, entity_regex = classify_cypher_intent(question)
             if q_type_regex:
                 query_type = q_type_regex
@@ -166,22 +166,12 @@ async def _run_pipeline_inner(
                 exact=False,
             )
 
-        # ── Step 5: Count/statistics → always CYPHER, no entity needed ────
-        if query_type == "count":
-            return await _execute_cypher_path(
-                question=question,
-                disease_name=None,
-                query_type="count",
-                start_time=start_time,
-                exact=False,
-            )
-
-        # ── Step 6: No entity identified → LIGHTRAG ───────────────────────
+        # ── Step 5: No entity identified → LIGHTRAG ───────────────────────
         if not entity:
             logger.info("No entity extracted → LightRAG (method=%s)", routing_method)
             return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
 
-        # ── Step 7: Data-driven check — is entity in KG? ──────────────────
+        # ── Step 6: Data-driven check — is entity in KG? ──────────────────
         canonical, variants = await _disambiguate_entity(entity)
 
         if not variants:
@@ -206,7 +196,7 @@ async def _run_pipeline_inner(
                 execution_time_ms=elapsed_ms,
             )
 
-        # ── Step 8: Canonical found → CYPHER with exact match ─────────────
+        # ── Step 7: Canonical found → CYPHER with exact match ─────────────
         logger.info(
             "Route → CYPHER (type=%s entity='%s' method=%s)",
             query_type, canonical, routing_method,
@@ -379,10 +369,6 @@ def _extract_structured_data(query_type: str, records: list[dict]) -> list[dict]
     """Extract structured data from Cypher results for table rendering."""
     if not records:
         return None
-
-    if query_type == "count":
-        # Count results → already structured
-        return [records[0]]
 
     # For other types, extract key fields
     data = []

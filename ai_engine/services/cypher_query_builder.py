@@ -92,8 +92,6 @@ def build_cypher_query(
         "department":            _tmpl_department,
         "profile":               _tmpl_profile,
         "linked_diseases":       _tmpl_linked_diseases,
-        "count":                 _tmpl_count,
-        "count_by_type":         _tmpl_count_by_type,
         "find_by_symptom":       _tmpl_find_by_symptom,
         "find_by_medicine":      _tmpl_find_by_medicine,
         "find_by_nutrition_avoid": _tmpl_find_by_nutrition_avoid,
@@ -311,42 +309,6 @@ def _tmpl_linked_diseases(entity: str | None, _extra, exact: bool = False) -> tu
                d2.disease_category  AS linked_category
         """,
         {"name": entity, "limit": _LINKED_LIMIT},
-    )
-
-
-def _tmpl_count(_entity, _extra, _exact=False) -> tuple[str, dict]:
-    return (
-        """
-        MATCH (d:Disease)
-        WITH count(d) AS disease_count
-        MATCH (s:Symptom)
-        WITH disease_count, count(s) AS symptom_count
-        MATCH (m:Medicine)
-        WITH disease_count, symptom_count, count(m) AS medicine_count
-        MATCH (t:Treatment)
-        WITH disease_count, symptom_count, medicine_count, count(t) AS treatment_count
-        MATCH (a:Advice)
-        WITH disease_count, symptom_count, medicine_count, treatment_count, count(a) AS advice_count
-        MATCH ()-[r:IS_LINKED_WITH]->()
-        RETURN disease_count, symptom_count, medicine_count,
-               treatment_count, advice_count, count(r) AS linked_count
-        """,
-        {},
-    )
-
-
-def _tmpl_count_by_type(entity: str | None, _extra, _exact=False) -> tuple[str, dict]:
-    label_map = {
-        "benh": "Disease", "bệnh": "Disease", "disease": "Disease",
-        "trieu chung": "Symptom", "triệu chứng": "Symptom", "symptom": "Symptom",
-        "thuoc": "Medicine", "thuốc": "Medicine", "drug": "Medicine", "medicine": "Medicine",
-        "dieu tri": "Treatment", "điều trị": "Treatment", "treatment": "Treatment",
-        "loi khuyen": "Advice", "lời khuyên": "Advice", "advice": "Advice",
-    }
-    label = label_map.get((entity or "").lower().strip(), "Disease")
-    return (
-        f"MATCH (n:{label}) RETURN count(n) AS total, '{label}' AS node_type",
-        {},
     )
 
 

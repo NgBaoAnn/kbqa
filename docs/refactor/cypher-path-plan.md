@@ -1,6 +1,6 @@
 # Refactor: Cypher path — tách concern, sửa template, bỏ count
 
-**Trạng thái: PHIÊN 1 ✅ hoàn thành — đang ở PHIÊN 2**
+**Trạng thái: PHIÊN 1 ✅ PHIÊN 2 ✅ hoàn thành — đang ở PHIÊN 3**
 
 > Làm theo từng **PHIÊN**. Mỗi phiên độc lập, hệ thống vẫn chạy được sau mỗi phiên.
 > Sau mỗi phiên: tick checkbox `[x]`, cập nhật dòng "Trạng thái" ở trên, commit, dừng hỏi ý.
@@ -60,14 +60,14 @@ if exact:
 > Câu hỏi đếm/liệt kê không có câu trả lời chính xác trong bài toán y khoa → trả ví dụ tiêu biểu.
 > Template `count` hiện đang đếm toàn DB, bỏ qua entity ("viêm phổi").
 
-- [ ] `cypher_query_builder.py`: xoá `_tmpl_count`, `_tmpl_count_by_type` + 2 entry trong dict `builders`.
-- [ ] `query_router.py`: xoá `COUNT_PATTERNS` + vòng nhận diện count; xoá `"count"` khỏi `_VALID_QUERY_TYPES`;
+- [x] `cypher_query_builder.py`: xoá `_tmpl_count`, `_tmpl_count_by_type` + 2 entry trong dict `builders`.
+- [x] `query_router.py`: xoá `COUNT_PATTERNS` + vòng nhận diện count; xoá `"count"` khỏi `_VALID_QUERY_TYPES`;
   xoá mô tả + few-shot count trong `_INTENT_SYSTEM_PROMPT`; cập nhật docstring.
-- [ ] `query_router.py`: thêm few-shot: `"có bao nhiêu bệnh có triệu chứng ho khan"` → `{"query_type":"find_by_symptom","entity":"ho khan"}`.
-- [ ] `pipeline.py`: xoá Step 5 count; đổi `if entity is None and query_type != "count":` → `if entity is None:`;
+- [x] `query_router.py`: thêm regex + few-shot LLM: câu đếm/liệt kê → `find_by_symptom`/`symptoms` (ví dụ tiêu biểu, không trả số).
+- [x] `pipeline.py`: xoá Step 5 count; đổi `if entity is None and query_type != "count":` → `if entity is None:`;
   xoá nhánh `count` trong `_extract_structured_data`.
-- [ ] Verify: `pytest`; thử "có bao nhiêu bệnh có triệu chứng ho khan" → đi `find_by_symptom`, không trả số.
-- [ ] Commit: `refactor(router): remove count query_type, route counting to representative examples`.
+- [x] Verify: routing "có bao nhiêu bệnh có triệu chứng ho khan" → `find_by_symptom/ho khan`; "có bao nhiêu triệu chứng của viêm phổi" → `symptoms/viêm phổi`; `build_cypher_query('count',...)` → `None`. Grep sạch.
+- [x] Commit: `refactor(router): remove count query_type, route counting to representative examples`.
 
 ---
 
