@@ -1,6 +1,7 @@
 # Plan (checklist): Benchmark AegisHealth trên Kaggle — 3 kịch bản ablation
 
-**Trạng thái: PHASE 1 ✅ PHASE 2 ✅ — đang ở PHASE 3**
+**Trạng thái: PHASE 1 ✅ PHASE 2 ✅ PHASE 4 ✅ PHASE 5 ✅ PHASE 6 ✅ (3 notebook đã viết, CHƯA chạy trên Kaggle)**
+**— đang ở PHASE 3 (ship data lên Kaggle) → push branch → chạy 3 notebook → PHASE 7**
 > Mỗi PHASE độc lập, có thể dừng/tiếp xuyên phiên. Sau mỗi PHASE: tick `[x]`, cập nhật dòng "Trạng thái",
 > commit (nếu là code), rồi có thể dừng.
 > Đây là **nguồn chân lý tiến độ** trong repo. Đọc dòng "Trạng thái" + checkbox để biết đang ở đâu.
@@ -65,25 +66,29 @@ LLM thuần → +RAG vector → +KG. Tài nguyên giới hạn → chạy trên 
 - [ ] Tạo Kaggle Dataset `aegishealth-benchmark` chứa `golden_test_v2.json` + `kg_entities.txt`.
 - [ ] (Không commit data vào git — giữ quy ước `.gitignore`.)
 
-## PHASE 4 — Notebook 1 `kaggle_eval_1_baseline.ipynb` (LLM thuần)
-- [ ] Setup: GPU T4, Internet On, attach dataset. Chỉ cần Ollama + qwen2.5:3b (không Neo4j/Qdrant/bge-m3).
-- [ ] Inference: mỗi câu gọi thẳng `AsyncOpenAI` (closed-book medical prompt), KHÔNG `run_pipeline`.
-- [ ] Ghi `raw_baseline.jsonl` → `score_run` → `results_baseline.json` + `report_baseline.md`.
+## PHASE 4 — Notebook 1 `kaggle_eval_1_baseline.ipynb` (LLM thuần) ✅ (viết xong, chưa chạy)
+- [x] Setup: GPU T4, Internet On, attach dataset. Chỉ cần Ollama + qwen2.5:3b (không Neo4j/Qdrant/bge-m3).
+- [x] Inference: mỗi câu gọi thẳng `AsyncOpenAI` (closed-book medical prompt — yêu cầu format bold/bullet
+      giống synthesizer để mention extraction công bằng), KHÔNG `run_pipeline`.
+- [x] Ghi `raw_baseline.jsonl` → `score_run` → `results_baseline.json` + `report_baseline.md`.
+> Note: chưa chạy trên Kaggle — cần PHASE 3 (ship dataset) + push branch trước.
 
-## PHASE 5 — Notebook 2 `kaggle_eval_2_lightrag_naive.ipynb` (RAG vector)
-- [ ] Setup: + bge-m3 + Qdrant secrets; `DISABLE_CYPHER_PATH=true`, `LIGHTRAG_KG_STORAGE` non-Neo4j, `FORCE_LIGHTRAG_NAIVE_MODE=false`.
-- [ ] Inference: `await run_pipeline(q, mode="naive")` (ép LightRAG, bypass Cypher).
-- [ ] Tiền đề: Qdrant collections đã ingest (xác nhận smoke test). Ghi `raw_lightrag.jsonl` → score → report.
+## PHASE 5 — Notebook 2 `kaggle_eval_2_lightrag_naive.ipynb` (RAG vector) ✅ (viết xong, chưa chạy)
+- [x] Setup: + bge-m3 + Qdrant secrets; `DISABLE_CYPHER_PATH=true`, `LIGHTRAG_KG_STORAGE=NetworkXStorage` (non-Neo4j), `FORCE_LIGHTRAG_NAIVE_MODE=false`.
+- [x] Inference: `await run_pipeline(q, mode="naive")` (ép LightRAG, bypass Cypher) — in-process, set `os.environ` trước import.
+- [x] Ghi `raw_lightrag.jsonl` → score → report; in engine distribution.
+> Note: chưa chạy trên Kaggle — tiền đề Qdrant collections đã ingest cần xác nhận qua smoke test (Cell 7) khi chạy thật.
 
-## PHASE 6 — Notebook 3 `kaggle_eval_3_hybrid.ipynb` (Cypher + LightRAG)
-- [ ] **Kaggle UI**: GPU T4 ×1, Internet On; Secrets `NEO4J_URI/USERNAME/PASSWORD`, `QDRANT_URL/API_KEY`; attach dataset.
-- [ ] Cells (tái dùng `kaggle_benchmark.ipynb`, sửa 3 điểm):
-  - [ ] **#1** pull `qwen2.5:3b` **+ `bge-m3`** (không nomic-embed-text).
-  - [ ] **#2** `.env`: `EMBEDDING_MODEL=bge-m3`, `EMBEDDING_DIM=1024`, `LIGHTRAG_VECTOR_STORAGE=QdrantVectorDBStorage`, `LIGHTRAG_KG_STORAGE=Neo4JStorage`, `FORCE_LIGHTRAG_NAIVE_MODE=false`, `DISABLE_CYPHER_PATH=false`, `DEFAULT_QUERY_MODE=mix`.
-  - [ ] **#3** in-process: set `sys.path += [REPO_DIR, REPO_DIR/backend]` + `os.environ` TRƯỚC import, rồi `from app.services.pipeline import run_pipeline`.
-- [ ] Smoke 1 câu → xác nhận có câu `engine=cypher_direct`.
-- [ ] Inference `await run_pipeline(q)` (mode=None, router đầy đủ); lưu thêm `engine`+`query_mode`.
-- [ ] Ghi `raw_hybrid.jsonl` → score → report; vẽ **routing distribution** (cypher vs lightrag).
+## PHASE 6 — Notebook 3 `kaggle_eval_3_hybrid.ipynb` (Cypher + LightRAG) ✅ (viết xong, chưa chạy)
+- [x] **Kaggle UI**: GPU T4 ×1, Internet On; Secrets `NEO4J_URI/USERNAME/PASSWORD`, `QDRANT_URL/API_KEY`; attach dataset.
+- [x] Cells:
+  - [x] **#5** pull `qwen2.5:3b` **+ `bge-m3`** (không nomic-embed-text).
+  - [x] **#6** `os.environ`: `EMBEDDING_MODEL=bge-m3`, `EMBEDDING_DIM=1024`, `LIGHTRAG_VECTOR_STORAGE=QdrantVectorDBStorage`, `LIGHTRAG_KG_STORAGE=Neo4JStorage`, `FORCE_LIGHTRAG_NAIVE_MODE=false`, `DISABLE_CYPHER_PATH=false`, `DEFAULT_QUERY_MODE=mix`.
+  - [x] **#6** in-process: `sys.path += [REPO_DIR, REPO_DIR/backend]` + `os.environ` TRƯỚC import, rồi `from backend.app.services.pipeline import run_pipeline`.
+- [x] Smoke 1 câu (golden[0]) → xác nhận có câu `engine=cypher_direct`.
+- [x] Inference `await run_pipeline(q)` (mode=None, router đầy đủ); lưu thêm `engine`+`query_mode`.
+- [x] Ghi `raw_hybrid.jsonl` → score → report; vẽ **routing distribution** (cypher vs lightrag) → `routing_distribution.png`.
+> Note: chưa chạy trên Kaggle — cần PHASE 3 + push branch trước.
 
 ## PHASE 7 — Tổng hợp & kết luận
 - [ ] Gộp 3 `results_*.json` → bảng so sánh + biểu đồ.
@@ -101,7 +106,7 @@ LLM thuần → +RAG vector → +KG. Tài nguyên giới hạn → chạy trên 
 | `etl/benchmark_gen/rebuild_golden.py` | MỚI — rebuild + build KG_ENTITIES (PHASE 1). |
 | `data/benchmark/{golden_test_v2.json, golden_test_v2_stats.md, kg_entities.txt}` | MỚI (output, gitignored). |
 | `ai_engine/eval/score_golden.py` | MỚI — scorer dùng chung 3 notebook (PHASE 2). |
-| `notebooks/kaggle_eval_{1_baseline,2_lightrag_naive,3_hybrid}.ipynb` | MỚI (PHASE 4–6). |
+| `notebooks/kaggle_eval_{1_baseline,2_lightrag_naive,3_hybrid}.ipynb` | MỚI (PHASE 4–6) ✅. |
 | `backend/app/services/pipeline.py::run_pipeline` | tái dùng in-process, không sửa. |
 | (tham khảo) `notebooks/kaggle_benchmark.ipynb`, `etl/benchmark_gen/make_*.py`, `ai_engine/eval/eval_golden_test.py` | mượn pattern. |
 
