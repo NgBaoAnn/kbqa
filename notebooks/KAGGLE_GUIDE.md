@@ -2,7 +2,7 @@
 
 ## Tổng quan
 
-Notebook [`kaggle_ingest_qdrant.ipynb`](./kaggle_ingest_qdrant.ipynb) thực hiện:
+Notebook [`ingest_qdrant.ipynb`](./ingest_qdrant.ipynb) thực hiện:
 
 ```
 preprocessed_data.csv (8806 bệnh)
@@ -33,7 +33,7 @@ preprocessed_data.csv (8806 bệnh)
 1. Vào [kaggle.com/code](https://www.kaggle.com/code)
 2. Chọn **New Notebook**
 3. Trong notebook vừa tạo:
-   - **File** → **Import Notebook** → upload file `notebooks/kaggle_ingest_qdrant.ipynb`
+   - **File** → **Import Notebook** → upload file `notebooks/ingest_qdrant.ipynb`
    - Hoặc copy-paste từng cell thủ công
 
 ---
@@ -49,7 +49,7 @@ Trong cửa sổ notebook Kaggle:
 
 ## Bước 4 — Đặt Qdrant Credentials (Kaggle Secrets)
 
-> ⚠️ **Không** hardcode API key trực tiếp trong notebook (đặc biệt nếu notebook public)
+>  **Không** hardcode API key trực tiếp trong notebook (đặc biệt nếu notebook public)
 
 1. Bên trái notebook → **Add-ons** → **Secrets**
 2. Thêm 2 secret:
@@ -92,9 +92,9 @@ Nhấn **Run All** hoặc chạy từng cell theo thứ tự:
 Sau khi chạy xong, Cell 8 sẽ hiển thị:
 
 ```
-📊 Final count in Qdrant: 8,806 chunks
-📊 Expected:              8,806 chunks
-✅ INGESTION COMPLETE! Tất cả chunks đã được nạp vào Qdrant.
+ Final count in Qdrant: 8,806 chunks
+ Expected:              8,806 chunks
+ INGESTION COMPLETE! Tất cả chunks đã được nạp vào Qdrant.
 
 --- Test semantic search ---
 Query: 'bệnh sốt xuất huyết triệu chứng'
@@ -148,11 +148,11 @@ curl -X POST http://localhost:8000/query \
 
 ---
 
-# 🏁 Hướng dẫn chạy Benchmark trên Kaggle
+#  Hướng dẫn chạy Benchmark trên Kaggle
 
 ## Mục đích
 
-Notebook [`kaggle_benchmark.ipynb`](./kaggle_benchmark.ipynb) chạy toàn bộ **45 câu benchmark mù** với model lớn hơn (qwen2.5:7b / 14b) để so sánh với kết quả local (qwen2.5:3b).
+Notebook [`run_benchmark.ipynb`](./run_benchmark.ipynb) chạy toàn bộ **45 câu benchmark mù** với model lớn hơn (qwen2.5:7b / 14b) để so sánh với kết quả local (qwen2.5:3b).
 
 ## Kiến trúc trên Kaggle
 
@@ -178,7 +178,7 @@ Vào notebook → **Add-ons** → **Secrets**, thêm các secret sau và bật t
 ## Bước 2 — Upload và cài đặt
 
 1. Vào [kaggle.com/code](https://www.kaggle.com/code) → **New Notebook**
-2. **File** → **Import Notebook** → upload `notebooks/kaggle_benchmark.ipynb`
+2. **File** → **Import Notebook** → upload `notebooks/run_benchmark.ipynb`
 3. **Settings** → **Accelerator** → **GPU T4 x1**
 4. **Settings** → **Internet** → **On**
 
