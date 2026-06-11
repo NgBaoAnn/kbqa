@@ -23,11 +23,12 @@ async def list_diseases(
 
 
 @router.get(
-    "/diseases/{disease_id}",
+    "/diseases/{disease_id:path}",
     response_model=DiseaseDetailResponse,
     summary="Get Disease Detail",
     responses={501: {"description": "Contract stub, not implemented yet"}},
 )
 async def get_disease(disease_id: str):
-    return await knowledge_service.get_disease(disease_id=disease_id)
+    from urllib.parse import unquote
+    return await knowledge_service.get_disease(disease_id=unquote(disease_id))
 
