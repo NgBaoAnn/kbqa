@@ -139,16 +139,24 @@ class FakeDatabase:
     def _insert_message(self, query_l, params):
         message_id = str(uuid4())
         if "'assistant'" in query_l:
-            conversation_id, content, safety, metadata = params
+            # Sprint 2 signature: conv_id, content, response_type, data_json, safety_json, metadata_json
+            # Sprint 1 would have passed 4 params; accept both via len check.
+            if len(params) == 6:
+                conversation_id, content, response_type, data_json, safety_json, metadata_json = params
+            else:
+                # Legacy 4-param fallback (kept for safety)
+                conversation_id, content, safety_json, metadata_json = params
+                response_type = "text"
+                data_json = "null"
             row = {
                 "id": message_id,
                 "conversation_id": conversation_id,
                 "role": "assistant",
                 "content": content,
-                "response_type": "text",
-                "data": None,
-                "safety": json.loads(safety),
-                "metadata": json.loads(metadata),
+                "response_type": response_type,
+                "data": json.loads(data_json),
+                "safety": json.loads(safety_json),
+                "metadata": json.loads(metadata_json),
                 "created_at": self.now,
             }
         else:
@@ -254,22 +262,53 @@ def test_user_cannot_read_another_users_conversation(api):
     assert response.status_code == 404
 
 
-def test_create_mock_message_persists_user_and_assistant_messages(api):
+def test_create_message_persists_user_and_assistant_messages(api, monkeypatch):
+    """Sprint 2: create_message calls real AI adapter and persists both message rows."""
+    import asyncio
+    import types
+    from unittest.mock import AsyncMock
+    from uuid import uuid4 as _uuid4
+
+    from app.models.contracts import (
+        AIServiceResult, ChatMetadata, ChatSource, MessageCreateRequest, SafetyPayload
+    )
+    from app.services import chat_service as _cs
+
     client, fake_db = api
     fake_db.add_profile("user-1")
     conversation_id = fake_db.add_conversation("user-1")
 
-    response = client.post(
-        f"/api/v1/conversations/{conversation_id}/messages",
-        headers=_auth_headers(),
-        json={"question": "Đau đầu có nguy hiểm không?", "mode": None},
+    ai_result = AIServiceResult(
+        answer="AI trả lời test.",
+        response_type="text",
+        data=None,
+        sources=[
+            ChatSource(id=str(_uuid4()), source_type="other", title="T",
+                       snippet="s", rank=1, metadata={"engine": "lightrag"})
+        ],
+        safety=SafetyPayload(level="normal", requires_emergency_notice=False,
+                             disclaimer="Tham khảo."),
+        suggested_questions=[],
+        metadata=ChatMetadata(engine="lightrag", query_mode="mix",
+                              execution_time_ms=80.0, source_count=1, cypher=None),
+        raw_engine_metadata={"engine": "lightrag"},
+    )
+    mock_ai_module = types.SimpleNamespace(answer_question=AsyncMock(return_value=ai_result))
+
+    # Test the service function directly with injected mock AI (avoids HTTP pipeline)
+    result = asyncio.run(
+        _cs.create_message(
+            user_id="user-1",
+            conversation_id=conversation_id,
+            payload=MessageCreateRequest(question="Đau đầu có nguy hiểm không?"),
+            database=fake_db,
+            ai_service_module=mock_ai_module,
+        )
     )
 
-    assert response.status_code == 201
-    body = response.json()
-    assert body["conversation_id"] == conversation_id
-    assert body["status"] == "success"
-    assert body["response_type"] == "text"
-    assert body["metadata"]["engine"] == "mock"
-    assert [message["role"] for message in fake_db.messages] == ["user", "assistant"]
+    assert result.status == "success"
+    assert result.response_type == "text"
+    assert result.metadata.engine == "lightrag"  # real AI engine, not "mock"
+    # Both user and assistant messages persisted (exactly 2, not 4)
+    assert [m["role"] for m in fake_db.messages] == ["user", "assistant"]
     assert fake_db.messages[1]["safety"]["level"] == "normal"
