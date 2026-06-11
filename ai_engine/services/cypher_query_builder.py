@@ -171,12 +171,18 @@ def build_cypher_query(
         "prevention":            _tmpl_prevention,
         "department":            _tmpl_department,
         "profile":               _tmpl_profile,
+        "cause":                 _tmpl_cause,
+        "check_method":          _tmpl_check_method,
+        "susceptible_population": _tmpl_susceptible_population,
         "linked_diseases":       _tmpl_linked_diseases,
         "find_by_symptom":       _tmpl_find_by_symptom,
         "find_by_medicine":      _tmpl_find_by_medicine,
         "find_by_nutrition_avoid": _tmpl_find_by_nutrition_avoid,
         "find_by_nutrition_eat": _tmpl_find_by_nutrition_eat,
         "find_by_prevention":    _tmpl_find_by_prevention,
+        "find_by_check_method":  _tmpl_find_by_check_method,
+        "chain_linked_avoid":    _tmpl_chain_linked_avoid,
+        "chain_linked_eat":      _tmpl_chain_linked_eat,
     }
 
     builder = builders.get(query_type)
@@ -369,6 +375,69 @@ def _tmpl_profile(entity: str | None, _extra, exact: bool = False) -> tuple[str,
     )
 
 
+def _tmpl_cause(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    if not entity:
+        return (
+            "MATCH (d:Disease) "
+            "WHERE d.disease_cause IS NOT NULL "
+            "RETURN d.disease_name AS disease, d.disease_cause AS cause "
+            f"LIMIT {_DEFAULT_LIMIT}",
+            {},
+        )
+    wf = _tiered_where("d", exact)
+    return (
+        f"""
+        MATCH (d:Disease)
+        {wf}LIMIT $limit
+        RETURN d.disease_name   AS disease,
+               d.disease_cause  AS cause
+        """,
+        {"name": entity, "limit": _DEFAULT_LIMIT},
+    )
+
+
+def _tmpl_check_method(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) "
+            "WHERE s.check_method IS NOT NULL "
+            "RETURN d.disease_name AS disease, s.check_method AS check_method "
+            f"LIMIT {_DEFAULT_LIMIT}",
+            {},
+        )
+    wf = _tiered_where("d", exact, ("s",))
+    return (
+        f"""
+        MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
+        {wf}LIMIT $limit
+        RETURN d.disease_name  AS disease,
+               s.check_method  AS check_method
+        """,
+        {"name": entity, "limit": _DEFAULT_LIMIT},
+    )
+
+
+def _tmpl_susceptible_population(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) "
+            "WHERE s.people_easy_get IS NOT NULL "
+            "RETURN d.disease_name AS disease, s.people_easy_get AS risk_group "
+            f"LIMIT {_DEFAULT_LIMIT}",
+            {},
+        )
+    wf = _tiered_where("d", exact, ("s",))
+    return (
+        f"""
+        MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
+        {wf}LIMIT $limit
+        RETURN d.disease_name     AS disease,
+               s.people_easy_get  AS risk_group
+        """,
+        {"name": entity, "limit": _DEFAULT_LIMIT},
+    )
+
+
 def _tmpl_linked_diseases(entity: str | None, _extra, exact: bool = False) -> tuple[str, dict]:
     # Undirected match để bắt cả hai chiều của IS_LINKED_WITH.
     # ETL chỉ import một chiều nên dùng hướng có hướng sẽ bỏ sót bệnh link ngược.
@@ -528,6 +597,80 @@ def _tmpl_find_by_prevention(entity: str | None, _extra, _exact=False) -> tuple[
         LIMIT $limit
         RETURN d.disease_name        AS disease,
                a.disease_prevention  AS matched_prevention
+        """,
+        {"keyword": entity, "limit": _REVERSE_QUERY_LIMIT},
+    )
+
+
+# ── LLM Text2Cypher fallback ────────────────────────────────────────────────
+
+def _tmpl_find_by_check_method(entity: str | None, _extra, _exact=False) -> tuple[str, dict]:
+    """Reverse: find diseases whose check_method contains keyword."""
+    if not entity:
+        return (
+            "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) "
+            "WHERE s.check_method IS NOT NULL "
+            "RETURN d.disease_name AS disease, s.check_method AS matched_check_method "
+            f"LIMIT {_REVERSE_QUERY_LIMIT}",
+            {},
+        )
+    relevance = _token_relevance("s.check_method")
+    return (
+        f"""
+        MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
+        WHERE toLower(s.check_method) CONTAINS toLower($keyword)
+        WITH d, s,
+             {relevance} AS relevance
+        ORDER BY relevance, d.disease_name
+        LIMIT $limit
+        RETURN d.disease_name  AS disease,
+               s.check_method  AS matched_check_method
+        """,
+        {"keyword": entity, "limit": _REVERSE_QUERY_LIMIT},
+    )
+
+
+def _tmpl_chain_linked_avoid(entity: str | None, _extra, _exact=False) -> tuple[str, dict]:
+    """2-hop Chain: Find diseases linked to entity X, then get their nutrition_not_eat."""
+    if not entity:
+        return None, None
+    return (
+        f"""
+        MATCH (d1:Disease)-[:IS_LINKED_WITH]-(d2:Disease)
+        WHERE toLower(d1.disease_name) CONTAINS toLower($keyword)
+           OR toLower(d2.disease_name) CONTAINS toLower($keyword)
+        WITH CASE 
+               WHEN toLower(d1.disease_name) CONTAINS toLower($keyword) THEN d2 
+               ELSE d1 
+             END AS target
+        MATCH (target)-[:HAS_ADVICE]->(a:Advice)
+        WHERE a.nutrition_not_eat IS NOT NULL AND a.nutrition_not_eat <> ''
+        RETURN target.disease_name AS linked_disease,
+               a.nutrition_not_eat AS should_avoid
+        LIMIT $limit
+        """,
+        {"keyword": entity, "limit": _REVERSE_QUERY_LIMIT},
+    )
+
+
+def _tmpl_chain_linked_eat(entity: str | None, _extra, _exact=False) -> tuple[str, dict]:
+    """2-hop Chain: Find diseases linked to entity X, then get their nutrition_do_eat."""
+    if not entity:
+        return None, None
+    return (
+        f"""
+        MATCH (d1:Disease)-[:IS_LINKED_WITH]-(d2:Disease)
+        WHERE toLower(d1.disease_name) CONTAINS toLower($keyword)
+           OR toLower(d2.disease_name) CONTAINS toLower($keyword)
+        WITH CASE 
+               WHEN toLower(d1.disease_name) CONTAINS toLower($keyword) THEN d2 
+               ELSE d1 
+             END AS target
+        MATCH (target)-[:HAS_ADVICE]->(a:Advice)
+        WHERE a.nutrition_do_eat IS NOT NULL AND a.nutrition_do_eat <> ''
+        RETURN target.disease_name AS linked_disease,
+               a.nutrition_do_eat  AS should_eat
+        LIMIT $limit
         """,
         {"keyword": entity, "limit": _REVERSE_QUERY_LIMIT},
     )

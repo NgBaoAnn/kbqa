@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 
 # ── Payload budget constants ────────────────────────────────────────────────
 
-_MAX_RECORDS = 3
+_MAX_RECORDS = 5
 _MAX_FIELD_CHARS = 300
-_MAX_PAYLOAD_CHARS = 3000
+_MAX_PAYLOAD_CHARS = 4000
 
 # Map Cypher alias keys → human-readable Vietnamese labels
 _KEY_LABELS: dict[str, str] = {
@@ -65,6 +65,10 @@ _BLOB_FIELDS: frozenset[str] = frozenset({
     "Khoa điều trị",
 })
 
+_LONG_TEXT_FIELDS: frozenset[str] = frozenset({
+    "Mô tả", "Nguyên nhân",
+})
+
 _LOW_PRIORITY_FIELDS: frozenset[str] = frozenset({
     "Chi tiết thuốc", "Thực đơn gợi ý", "Nên ăn", "Không nên ăn", "Phòng ngừa"
 })
@@ -83,8 +87,23 @@ def _clean_category(value: str) -> str:
 
 
 def _split_blob(value: str) -> list[str] | str:
-    """Split a comma-separated blob into a list if it has >= 2 items."""
-    items = [x.strip() for x in value.split(",") if x.strip()]
+    """Split a comma-separated blob into a deduplicated list if it has >= 2 items.
+
+    Machine-translated source blobs often repeat the same item verbatim
+    (case/spacing aside); drop exact duplicates here so the LLM never lists them
+    twice. Fuzzy near-duplicates are left for the LLM to merge.
+    """
+    seen: set[str] = set()
+    items: list[str] = []
+    for raw in value.split(","):
+        x = raw.strip()
+        if not x:
+            continue
+        key = x.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(x)
     if len(items) >= 2:
         return items[:_MAX_LIST_ITEMS]
     return value
@@ -115,7 +134,10 @@ def _prepare_records_for_llm(records: list[dict]) -> tuple[str, str]:
             label = _KEY_LABELS.get(k, k)
             if label == "Chuyên khoa":
                 s = _clean_category(s)
-            s = s[:_MAX_FIELD_CHARS] + "..." if len(s) > _MAX_FIELD_CHARS else s
+            
+            if label not in _LONG_TEXT_FIELDS:
+                s = s[:_MAX_FIELD_CHARS] + "..." if len(s) > _MAX_FIELD_CHARS else s
+                
             if label in _BLOB_FIELDS:
                 item[label] = _split_blob(s)
             else:
@@ -191,34 +213,59 @@ async def synthesize_answer(question: str, records: list[dict]) -> str:
     data_text, note = _prepare_records_for_llm(records)
 
     system_prompt = (
-        "Bạn là trợ lý y khoa AegisHealth. Nhiệm vụ: Đọc hiểu câu hỏi, chọn lọc dữ liệu phù hợp "
-        "và trình bày thành câu trả lời tiếng Việt mạch lạc.\n\n"
+        "Bạn là trợ lý y khoa AegisHealth. Dữ liệu bạn nhận được là kết quả truy vấn thô từ cơ sở tri thức (đôi khi được dịch máy từ tiếng Trung nên câu từ có thể lủng củng, chứa lỗi rác). "
+        "Nhiệm vụ của bạn là biên tập lại phần Dữ liệu thành một câu trả lời tiếng Việt tự nhiên, mạch lạc, chuẩn văn phong y khoa cho người dùng.\n\n"
+        "<core_principle>\n"
+        "Câu trả lời CHỈ được dựa trên phần Dữ liệu. Mọi tên bệnh, tên thuốc, triệu chứng, đối tượng, con số trong câu trả lời PHẢI xuất hiện trong Dữ liệu. "
+        "TUYỆT ĐỐI KHÔNG bịa thêm, KHÔNG suy luận cơ chế y khoa, KHÔNG bổ sung kiến thức bên ngoài. Nếu Dữ liệu thưa, hãy trả lời ngắn — thà thiếu còn hơn bịa.\n"
+        "</core_principle>\n\n"
         "<rules>\n"
-        "1. LỌC DỮ LIỆU: Chỉ giữ lại các bản ghi khớp với câu hỏi. Nếu câu hỏi tìm bệnh dựa trên triệu chứng/chế độ ăn, hãy liệt kê các bệnh có chứa yếu tố đó trong dữ liệu.\n"
-        "2. KHÔNG SUY DIỄN: CHỈ dùng thông tin có trong dữ liệu. TUYỆT ĐỐI KHÔNG tự giải thích cơ chế, phương pháp chẩn đoán, hay tự đưa ra nhận xét chung.\n"
-        "3. ĐỊNH DẠNG NGHIÊM NGẶT: Phải in đậm (**) tên bệnh và tên thuốc. Mọi danh sách (triệu chứng, thuốc, thực phẩm) PHẢI được gạch đầu dòng (-) từng mục một. Tuyệt đối không gộp nhiều mục vào chung một câu văn xuôi.\n"
-        "4. Bỏ qua các từ phiên âm vô nghĩa như 'Úc Trác', 'Yan Peng Hui'.\n"
-        "5. Dừng trả lời ngay sau mục cuối cùng, KHÔNG thêm lời khuyên y tế ở cuối.\n"
+        "1. BIÊN TẬP KHÔNG SUY DIỄN: Được phép sửa lỗi ngữ pháp, sắp xếp lại câu lủng củng do dịch máy cho mạch lạc, NHƯNG phải giữ NGUYÊN nghĩa gốc, giữ nguyên tên bệnh / tên thuốc và mọi con số (vd tỉ lệ khỏi) đúng như trong Dữ liệu — không đổi tên, không làm tròn.\n"
+        "2. LỌC RÁC, KHÔNG BỎ SÓT: Lược bỏ các token phiên âm vô nghĩa hoặc cụm tối nghĩa (như 'Úc Trác', 'Yan Peng Hui', 'Wang Li Li') BÊN TRONG một trường. Tuy nhiên TUYỆT ĐỐI không bỏ sót cả một bản ghi: với câu hỏi tìm ngược / liệt kê (vd 'bệnh nào...'), phải trình bày ĐẦY ĐỦ mọi bệnh có trong Dữ liệu.\n"
+        "3. THIẾU DỮ LIỆU: Nếu một khía cạnh không có trong Dữ liệu, chỉ cần BỎ QUA — không bịa và cũng không thêm câu kiểu 'cơ sở dữ liệu chưa có thông tin'.\n"
+        "4. ĐỊNH DẠNG TRỰC QUAN:\n"
+        "   - Luôn in đậm (**) tên Bệnh và tên Thuốc.\n"
+        "   - Các danh sách (Triệu chứng, Thực phẩm, Thuốc) nên được gạch đầu dòng (-).\n"
+        "   - Trình bày thông tin một cách tự nhiên, liên kết các ý mạch lạc thay vì chỉ liệt kê khô khan.\n"
+        "5. NGỮ ĐIỆU: Chuyên nghiệp, khách quan, trực diện. Trả lời thẳng vào nội dung, KHÔNG mở đầu bằng câu dẫn kiểu 'Dựa trên dữ liệu...'. Dừng ngay sau khi giải quyết xong câu hỏi, KHÔNG tự thêm lời khuyên y tế hay khuyên đi khám bác sĩ ở cuối.\n"
+        "6. DIỄN ĐẠT MƯỢT & GỌN: Dữ liệu dịch máy thường lủng củng và lặp từ — hãy viết lại thành tiếng Việt y khoa tự nhiên: dùng thuật ngữ chuẩn, bỏ từ/cụm bị lặp, lược các chữ thừa, và GỘP các mục trùng hoặc gần trùng nghĩa thành MỘT mục duy nhất. Đây chỉ là chuẩn hóa câu chữ cho dễ đọc — vẫn tuân thủ <core_principle>: không thêm thông tin mới, không đổi nghĩa.\n"
         "</rules>\n\n"
         "<examples>\n"
         "User: ho gà có triệu chứng gì?\n"
-        "Data: [{\"Bệnh\": \"Ho gà\", \"Triệu chứng\": [\"ho co thắt\", \"sốt nhẹ\", \"Yan Peng Hui\"]}, "
-        "{\"Bệnh\": \"Ho khan mạn tính\", \"Triệu chứng\": [\"ho kéo dài\"]}]\n"
-        "Assistant: Bệnh **Ho gà** có các triệu chứng:\n"
+        "Data: [{\"Bệnh\": \"Ho gà\", \"Triệu chứng\": [\"Crack kêu khi hít vào\", \"ho co thắt\", \"tức ngực\", \"phổi âm u\", \"co giật\", \"Yan Peng Hui\"]}]\n"
+        "Assistant: Bệnh **Ho gà** có các triệu chứng chính bao gồm:\n"
+        "- Tiếng rít (crack) khi hít vào\n"
         "- Ho co thắt\n"
-        "- Sốt nhẹ\n\n"
-        "User: tránh ăn [bia, rượu trắng] có thể hỗ trợ điều trị bệnh gì?\n"
-        "Data: [{\"Bệnh\": \"Bệnh cơ tim\", \"Không nên ăn\": [\"bia\", \"rượu trắng\", \"chân gà\"]}, "
-        "{\"Bệnh\": \"Viêm phổi\", \"Nên ăn\": [\"trái cây\"]}]\n"
-        "Assistant: Việc tránh ăn bia, rượu trắng có thể hỗ trợ điều trị các bệnh sau:\n"
-        "- **Bệnh cơ tim** (cũng nên kiêng chân gà)\n\n"
-        "User: thuốc chữa rối loạn lo âu ở trẻ em?\n"
-        "Data: [{\"Bệnh\": \"Rối loạn lo âu ở trẻ em\", \"Thuốc đề xuất\": "
-        "[\"Paroxetine hydrochloride\", \"Butyrone hydrochloride\", \"Carbamazepine\"]}]\n"
-        "Assistant: Đối với **Rối loạn lo âu ở trẻ em**, các thuốc được đề xuất gồm:\n"
-        "- **Paroxetine hydrochloride**\n"
-        "- **Butyrone hydrochloride**\n"
-        "- **Carbamazepine**\n"
+        "- Tức ngực\n"
+        "- Âm phổi bất thường (phổi âm u)\n"
+        "- Co giật\n\n"
+        "User: triệu chứng suy thận?\n"
+        "Data: [{\"Bệnh\": \"Suy thận\", \"Triệu chứng\": [\"Buồn nôn và nôn\", "
+        "\"Phù thận và các đặc điểm trên khuôn mặt\", \"Nước tiểu sẫm màu\", \"Nitơ máu\", \"tăng nitơ máu trong cơ thể\"]}]\n"
+        "Assistant: Bệnh **Suy thận** thường biểu hiện qua các triệu chứng sau:\n"
+        "- Buồn nôn, nôn ói\n"
+        "- Phù mặt\n"
+        "- Nước tiểu sẫm màu\n"
+        "- Tăng nitơ máu\n\n"
+        "User: kiêng ăn cua biển có thể hỗ trợ điều trị bệnh gì?\n"
+        "Data: [{\"Bệnh\": \"Ho gà\", \"Không nên ăn\": [\"Cua\", \"cua biển\", \"tôm biển\", \"ốc biển\"]}, "
+        "{\"Bệnh\": \"Ngộ độc benzen\", \"Không nên ăn\": [\"cua\", \"tôm\", \"hải sâm (ngâm trong nước)\"]}]\n"
+        "Assistant: Việc kiêng cua biển có thể hỗ trợ quá trình điều trị các bệnh lý sau:\n"
+        "- **Ho gà** (bệnh nhân cũng nên kiêng cua nói chung, tôm biển và ốc biển)\n"
+        "- **Ngộ độc benzen** (bệnh nhân nên kết hợp kiêng thêm tôm và hải sâm ngâm nước)\n\n"
+        "User: thuốc chữa rối loạn lo âu?\n"
+        "Data: [{\"Bệnh\": \"Rối loạn lo âu\", \"Thuốc đề xuất\": "
+        "[\"Viên nén Paroxetine hydrochloride\", \"viên nén chlorpromazine hydrochloride\", \"viên nén carbamazepine\"]}]\n"
+        "Assistant: Đối với **Rối loạn lo âu**, các loại thuốc thường được đề xuất sử dụng bao gồm:\n"
+        "- **Viên nén Paroxetine hydrochloride**\n"
+        "- **Viên nén chlorpromazine hydrochloride**\n"
+        "- **Viên nén carbamazepine**\n\n"
+        "User: nguyên nhân gây ra bệnh tiểu đường?\n"
+        "Data: [{\"Bệnh\": \"Tiểu đường\", \"Nguyên nhân\": \"Có sự không đồng nhất di truyền rõ rệt trong bệnh tiểu đường loại I hoặc loại II. Bệnh tiểu đường có khuynh hướng gia đình, 1/4 đến 1/2 bệnh nhân có tiền sử gia đình. Có ít nhất 60 hội chứng di truyền liên quan đến bệnh tiểu đường trên lâm sàng.\"}]\n"
+        "Assistant: Nguyên nhân gây ra bệnh **Tiểu đường** chủ yếu liên quan đến yếu tố di truyền, cụ thể:\n"
+        "- Có sự không đồng nhất di truyền rõ rệt ở cả tiểu đường loại I và loại II.\n"
+        "- Có khuynh hướng di truyền trong gia đình.\n"
+        "- Dưới góc độ lâm sàng, đã phát hiện ít nhất 60 hội chứng di truyền có liên quan đến căn bệnh này.\n"
         "</examples>"
     )
 
