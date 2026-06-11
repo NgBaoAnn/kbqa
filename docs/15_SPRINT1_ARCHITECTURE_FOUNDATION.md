@@ -277,3 +277,83 @@ Authorization: Bearer <access_token>
 ```
 
 - Use Supabase Auth for sign up, sign in, sign out and optional anonymous auth.
+
+---
+
+## 3. S1-ARCH-04 — OpenAPI Contract Stubs
+
+### 3.1. Contract modules
+
+The backend contract models are defined in `backend/app/models/contracts.py`.
+
+| Contract group | Models |
+|---|---|
+| Current user | `CurrentUserResponse` |
+| Conversations | `ConversationCreateRequest`, `ConversationSummary`, `ConversationDetail` |
+| Messages/chat | `MessageCreateRequest`, `ChatResponse`, `ChatSource`, `SafetyPayload`, `ChatMetadata` |
+| Feedback | `FeedbackCreateRequest`, `FeedbackResponse` |
+| Knowledge | `DiseaseListResponse`, `DiseaseSummary`, `DiseaseDetailResponse` |
+| Admin | `AdminMetricsResponse` |
+
+### 3.2. Contract endpoints
+
+| Method | Path | Router | Status |
+|---|---|---|---|
+| `GET` | `/api/v1/me` | `routers/me.py` | Functional Supabase token smoke endpoint |
+| `POST` | `/api/v1/conversations` | `routers/conversations.py` | Contract stub |
+| `GET` | `/api/v1/conversations` | `routers/conversations.py` | Contract stub |
+| `GET` | `/api/v1/conversations/{conversation_id}` | `routers/conversations.py` | Contract stub |
+| `POST` | `/api/v1/conversations/{conversation_id}/messages` | `routers/conversations.py` | Contract stub |
+| `POST` | `/api/v1/messages/{message_id}/feedback` | `routers/feedback.py` | Contract stub |
+| `GET` | `/api/v1/knowledge/diseases` | `routers/knowledge.py` | Contract stub |
+| `GET` | `/api/v1/knowledge/diseases/{disease_id}` | `routers/knowledge.py` | Contract stub |
+| `GET` | `/api/v1/admin/metrics` | `routers/admin.py` | Contract stub |
+
+All stub endpoints are included in FastAPI OpenAPI and have request/response schemas with examples. Stubbed endpoints intentionally return `501 NOT_IMPLEMENTED` until Người 2 implements the service logic.
+
+Verify OpenAPI registration:
+
+```bash
+PYTHONPATH=backend ./.venv/bin/python -c "from app.main import app; print(app.openapi()['paths'].keys())"
+```
+
+---
+
+## 4. S1-ARCH-05 — Backend Skeleton
+
+### 4.1. Router/service split
+
+Routers are thin: they parse request data, require Supabase auth when needed, and delegate to service modules.
+
+| Router | Delegates to |
+|---|---|
+| `routers/conversations.py` | `services/chat_service.py` |
+| `routers/feedback.py` | `services/feedback_service.py` |
+| `routers/knowledge.py` | `services/knowledge_service.py` |
+| `routers/admin.py` | `services/analytics_service.py` |
+| `routers/me.py` | `api_gateway/dependencies.py`; later `services/user_service.py` |
+
+### 4.2. Service skeleton modules
+
+| Service module | Implementation status |
+|---|---|
+| `services/user_service.py` | Stub for profile lookup |
+| `services/chat_service.py` | Stub for conversation/message lifecycle |
+| `services/ai_service.py` | Stub adapter boundary over `ai_engine` |
+| `services/feedback_service.py` | Stub for feedback/review item creation |
+| `services/knowledge_service.py` | Stub for Neo4j-backed disease browsing |
+| `services/analytics_service.py` | Stub for admin metrics |
+
+### 4.3. Verification
+
+Run backend tests:
+
+```bash
+./.venv/bin/python -m pytest backend/tests -q
+```
+
+Expected result after S1-ARCH-05:
+
+```text
+23 passed
+```
