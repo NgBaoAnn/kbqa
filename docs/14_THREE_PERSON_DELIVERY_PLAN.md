@@ -409,6 +409,7 @@ frontend/src/
 | Frontend | `VITE_SUPABASE_ANON_KEY` | Public anon key, được phép dùng trong browser |
 | Frontend | `VITE_API_BASE_URL` | URL FastAPI backend |
 | Backend | `SUPABASE_URL` | Supabase project URL |
+| Backend | `SUPABASE_ANON_KEY` | Public anon key, useful for backend-side dev smoke tests; not a service key |
 | Backend | `SUPABASE_JWT_SECRET` hoặc JWKS config | Dùng để verify Supabase access token |
 | Backend | `SUPABASE_SERVICE_ROLE_KEY` | Chỉ dùng server-side khi cần admin operation; tuyệt đối không đưa vào frontend |
 | Backend | `SUPABASE_DB_URL` | Connection string tới Supabase Postgres nếu backend dùng SQLAlchemy/Alembic |
