@@ -1,14 +1,23 @@
-"""Conversation and chat service backed by Supabase Postgres."""
+"""Conversation and chat service backed by Supabase Postgres.
+
+Sprint 2 changes (S2-BE-01, S2-BE-02):
+- create_message() now calls ai_service.answer_question() instead of the mock.
+- Assistant message is persisted with full answer/response_type/safety/metadata.
+- message_sources rows are inserted for each ChatSource from the AI result.
+- query_logs row is inserted with engine/query_mode/latency/source_count.
+"""
 
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from fastapi import HTTPException, status
 
 from app.database import SupabaseDatabase, get_database
 from app.models.contracts import (
+    AIServiceResult,
     ChatMetadata,
     ChatResponse,
     ConversationCreateRequest,
@@ -18,7 +27,11 @@ from app.models.contracts import (
     MessageRecord,
     SafetyPayload,
 )
+from app.services import ai_service  # module-level so tests can patch it
 
+logger = logging.getLogger(__name__)
+
+# ── Column projections ─────────────────────────────────────────────────────
 
 CONVERSATION_COLUMNS = """
     id::text as id,
@@ -40,6 +53,9 @@ MESSAGE_COLUMNS = """
 """
 
 
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+
 def _not_found() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -58,12 +74,95 @@ def _message_record(row: dict[str, Any]) -> MessageRecord:
     return MessageRecord(**row)
 
 
-def _mock_answer(question: str) -> str:
-    return (
-        "Đây là phản hồi thử nghiệm của AegisHealth trong Sprint 1. "
-        "Hệ thống đã lưu câu hỏi của bạn và chưa gọi AI thật ở giai đoạn này. "
-        f"Nội dung cần xử lý: {question}"
+def _persist_message_sources(
+    db: SupabaseDatabase,
+    message_id: str,
+    ai_result: AIServiceResult,
+) -> None:
+    """Insert one row into public.message_sources per ChatSource in ai_result.
+
+    Each source's metadata dict is serialized to JSONB.  Secret keys are already
+    stripped by source_policy before reaching here, so no additional sanitisation
+    is needed.
+    """
+    for source in ai_result.sources:
+        db.execute(
+            """
+            insert into public.message_sources (
+                message_id,
+                source_type,
+                title,
+                snippet,
+                metadata,
+                rank
+            )
+            values (%s, %s, %s, %s, %s::jsonb, %s)
+            """,
+            (
+                message_id,
+                source.source_type,
+                source.title,
+                source.snippet or "",
+                json.dumps(source.metadata),
+                source.rank,
+            ),
+        )
+
+
+def _persist_query_log(
+    db: SupabaseDatabase,
+    message_id: str,
+    ai_result: AIServiceResult,
+    ai_called: bool,
+) -> None:
+    """Insert one row into public.query_logs for the AI call.
+
+    raw_engine_metadata is used here so the log reflects what the pipeline
+    actually returned, not the normalised ChatMetadata.  Crucially it must NOT
+    contain secrets — that guarantee comes from ai_service which never puts
+    credentials in raw_engine_metadata.
+    """
+    meta = ai_result.metadata
+    # Determine status: if the pipeline returned an error, log it as 'error'
+    raw = ai_result.raw_engine_metadata
+    query_status = "error" if raw.get("error_code") else "success"
+
+    # Build clean log metadata — exclude any key that looks like a secret
+    log_meta: dict[str, Any] = {
+        "sprint": 2,
+        "ai_called": ai_called,
+        "query_mode": meta.query_mode,
+    }
+    # Include error_code if present (helpful for debugging, not a secret)
+    if raw.get("error_code"):
+        log_meta["error_code"] = raw["error_code"]
+
+    db.execute(
+        """
+        insert into public.query_logs (
+            message_id,
+            engine,
+            query_mode,
+            execution_time_ms,
+            source_count,
+            status,
+            metadata
+        )
+        values (%s, %s, %s, %s, %s, %s, %s::jsonb)
+        """,
+        (
+            message_id,
+            meta.engine,
+            meta.query_mode,
+            meta.execution_time_ms,
+            meta.source_count,
+            query_status,
+            json.dumps(log_meta),
+        ),
     )
+
+
+# ── Public service functions ───────────────────────────────────────────────
 
 
 async def create_conversation(
@@ -145,8 +244,26 @@ async def create_message(
     conversation_id: str,
     payload: MessageCreateRequest,
     database: SupabaseDatabase | None = None,
+    ai_service_module=None,  # injectable for testing
 ) -> ChatResponse:
+    """Handle a user question: call AI, persist messages, sources and query log.
+
+    Flow:
+    1. Verify the conversation belongs to this user.
+    2. Insert the user message.
+    3. Call ai_service.answer_question() for the real AI response.
+    4. Insert the assistant message with full response_type / safety / metadata.
+    5. Insert message_sources rows (S2-BE-02).
+    6. Insert query_logs row (S2-BE-02).
+    7. Update conversation.updated_at.
+    8. Return a ChatResponse mapping the persisted assistant message.
+
+    The ``ai_service_module`` parameter allows tests to inject a mock without
+    patching the global import.
+    """
     db = database or get_database()
+
+    # ── Step 1: Verify ownership ───────────────────────────────────────────
     conversation = db.fetch_one(
         "select id::text as id from public.conversations where id = %s and user_id = %s",
         (conversation_id, user_id),
@@ -154,6 +271,7 @@ async def create_message(
     if conversation is None:
         raise _not_found()
 
+    # ── Step 2: Persist user message ──────────────────────────────────────
     db.fetch_one(
         f"""
         insert into public.messages (conversation_id, role, content, metadata)
@@ -167,15 +285,19 @@ async def create_message(
         ),
     )
 
-    safety = SafetyPayload()
-    metadata = ChatMetadata(
-        engine="mock",
-        query_mode=payload.mode or "mock:sprint1",
-        execution_time_ms=0,
-        source_count=0,
-        cypher=None,
+    # ── Step 3: Call AI service ───────────────────────────────────────────
+    # ai_service_module allows tests to inject a mock without patching the global
+    # import. Production code uses the module-level `ai_service` (patchable).
+    _ai = ai_service_module if ai_service_module is not None else ai_service
+    ai_result: AIServiceResult = await _ai.answer_question(
+        question=payload.question,
+        mode=payload.mode,
+        conversation_id=conversation_id,
     )
-    answer = _mock_answer(payload.question)
+
+    # ── Step 4: Persist assistant message ─────────────────────────────────
+    # json.dumps(None) produces the string "null" which is valid JSONB.
+    data_json = json.dumps(ai_result.data)
     assistant_row = db.fetch_one(
         f"""
         insert into public.messages (
@@ -187,52 +309,45 @@ async def create_message(
             safety,
             metadata
         )
-        values (%s, 'assistant', %s, 'text', null, %s::jsonb, %s::jsonb)
+        values (%s, 'assistant', %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
         returning {MESSAGE_COLUMNS}
         """,
         (
             conversation_id,
-            answer,
-            safety.model_dump_json(),
-            metadata.model_dump_json(),
+            ai_result.answer,
+            ai_result.response_type,
+            data_json,
+            ai_result.safety.model_dump_json(),
+            ai_result.metadata.model_dump_json(),
         ),
     )
     if assistant_row is None:
         raise RuntimeError("Failed to persist assistant message.")
 
+    assistant_message_id = assistant_row["id"]
+
+    # ── Step 5: Persist message_sources ───────────────────────────────────
+    _persist_message_sources(db, assistant_message_id, ai_result)
+
+    # ── Step 6: Persist query_log ─────────────────────────────────────────
+    _persist_query_log(db, assistant_message_id, ai_result, ai_called=True)
+
+    # ── Step 7: Update conversation timestamp ─────────────────────────────
     db.execute(
         "update public.conversations set updated_at = timezone('utc', now()) where id = %s",
         (conversation_id,),
     )
-    db.execute(
-        """
-        insert into public.query_logs (
-            message_id,
-            engine,
-            query_mode,
-            execution_time_ms,
-            source_count,
-            status,
-            metadata
-        )
-        values (%s, 'mock', %s, 0, 0, 'success', %s::jsonb)
-        """,
-        (
-            assistant_row["id"],
-            metadata.query_mode,
-            json.dumps({"sprint": 1, "ai_called": False}),
-        ),
-    )
 
+    # ── Step 8: Build and return ChatResponse ─────────────────────────────
     return ChatResponse(
         conversation_id=conversation_id,
-        message_id=assistant_row["id"],
+        message_id=assistant_message_id,
         status="success",
-        response_type="text",
-        answer=answer,
-        data=None,
-        sources=[],
-        safety=safety,
-        suggested_questions=[],
-        metadata=metadata,
+        response_type=ai_result.response_type,
+        answer=ai_result.answer,
+        data=ai_result.data,
+        sources=ai_result.sources,
+        safety=ai_result.safety,
+        suggested_questions=ai_result.suggested_questions,
+        metadata=ai_result.metadata,
     )
