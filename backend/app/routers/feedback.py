@@ -1,4 +1,4 @@
-"""Feedback API contract stubs."""
+"""Feedback API — submit thumbs-up/thumbs-down ratings for assistant messages."""
 
 from fastapi import APIRouter, Body, Depends, Path
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/v1/messages", tags=["feedback"])
     response_model=FeedbackResponse,
     status_code=201,
     summary="Create Message Feedback",
-    responses={501: {"description": "Contract stub, not implemented yet"}},
+    responses={404: {"description": "Message not found"}},
 )
 async def create_feedback(
     message_id: str = Path(..., description="Assistant message UUID"),
