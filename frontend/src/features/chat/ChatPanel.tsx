@@ -1,11 +1,16 @@
 /**
- * ChatPanel — Claude-style chat workspace.
+ * ChatPanel — Claude-style chat workspace (Sprint 2).
  *
- * - Centered max-width messages (720px)
- * - User messages: right-aligned pill
- * - Assistant: no bubble border, avatar + flowing markdown
- * - Typing indicator with bouncing dots
- * - Floating bottom composer with focus ring
+ * Sprint 2 additions:
+ *  - Real API integration (no mock): POST /api/v1/conversations/{id}/messages
+ *  - Source/citation panel per assistant message (SourcePanel)
+ *  - Feedback controls per assistant message (FeedbackControls)
+ *  - Disambiguation option click → pre-fills composer
+ *  - Suggested questions → pre-fills composer
+ *  - Friendly error messages per HTTP status code
+ *  - History loaded from backend on mount (reload-safe)
+ *  - Loading states: conversation load, sending, pending assistant
+ *  - Disabled submit while sending
  */
 
 import {
@@ -25,15 +30,19 @@ import {
 import { getConversation, sendMessage } from "../../services/api";
 import type {
   ChatResponse,
+  ChatSource,
   ConversationSummary,
   MessageRecord,
+  SafetyPayload,
 } from "../../types/api";
 import { ChatResponseRenderer } from "../../components/ResponseRenderer";
+import { SourcePanel } from "../../components/SourcePanel";
+import { FeedbackControls } from "../../components/FeedbackControls";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type UIMessage =
-  | { kind: "record"; data: MessageRecord }
+  | { kind: "record"; data: MessageRecord; sources?: ChatSource[] }
   | { kind: "optimistic-user"; id: string; content: string; createdAt: string }
   | { kind: "optimistic-sending" }
   | { kind: "error"; id: string; content: string };
@@ -43,6 +52,25 @@ function timeLabel() {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date());
+}
+
+// ── Friendly error messages ───────────────────────────────────────────────────
+
+function friendlyError(err: unknown): string {
+  const apiErr = err as { status?: number; message?: string; error_code?: string };
+  if (apiErr.error_code === "AUTHENTICATION_REQUIRED" || apiErr.status === 401) {
+    return "Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.";
+  }
+  if (apiErr.status === 403) {
+    return "Tài khoản không có quyền truy cập tính năng này.";
+  }
+  if (apiErr.status === 404) {
+    return "Không tìm thấy hội thoại. Vui lòng chọn hoặc tạo hội thoại mới.";
+  }
+  if (apiErr.status && apiErr.status >= 500) {
+    return "Hệ thống đang gặp sự cố. Vui lòng thử lại sau ít phút.";
+  }
+  return apiErr.message ?? "Không nhận được phản hồi. Vui lòng thử lại.";
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────────
@@ -91,13 +119,13 @@ function UserMsg({ content, time }: { content: string; time: string }) {
   );
 }
 
-function AssistantMsg({
-  response,
-  time,
-}: {
+interface AssistantMsgProps {
   response: ChatResponse;
   time: string;
-}) {
+  onComposerFill?: (text: string) => void;
+}
+
+function AssistantMsg({ response, time, onComposerFill }: AssistantMsgProps) {
   return (
     <div className="message assistant-message">
       <div className="assistant-header">
@@ -107,26 +135,46 @@ function AssistantMsg({
         <span className="assistant-name">AegisHealth</span>
       </div>
       <div className="assistant-body">
-        <ChatResponseRenderer response={response} />
-        <div className="meta-row">
-          {response.metadata.engine !== "unknown" &&
-            response.metadata.engine !== "error" ? (
-            <span>{response.metadata.engine}</span>
-          ) : null}
-          {response.metadata.execution_time_ms > 0 ? (
-            <span>{response.metadata.execution_time_ms.toFixed(0)} ms</span>
-          ) : null}
-          {response.metadata.source_count > 0 ? (
-            <span>{response.metadata.source_count} nguồn</span>
-          ) : null}
-          <time>{time}</time>
+        <ChatResponseRenderer
+          response={response}
+          onDisambiguationSelect={onComposerFill}
+        />
+
+        {/* Sources panel */}
+        {response.sources && response.sources.length > 0 && (
+          <SourcePanel sources={response.sources} />
+        )}
+
+        <div className="message-footer">
+          <div className="meta-row">
+            {response.metadata.engine !== "unknown" &&
+              response.metadata.engine !== "error" ? (
+              <span>{response.metadata.engine}</span>
+            ) : null}
+            {response.metadata.execution_time_ms > 0 ? (
+              <span>{response.metadata.execution_time_ms.toFixed(0)} ms</span>
+            ) : null}
+            {response.metadata.source_count > 0 ? (
+              <span>{response.metadata.source_count} nguồn</span>
+            ) : null}
+            <time>{time}</time>
+          </div>
+
+          {/* Feedback controls */}
+          <FeedbackControls messageId={response.message_id} initialFeedback={response.feedback} />
         </div>
       </div>
     </div>
   );
 }
 
-function RecordMsg({ record }: { record: MessageRecord }) {
+interface RecordMsgProps {
+  record: MessageRecord;
+  sources?: ChatSource[];
+  onComposerFill?: (text: string) => void;
+}
+
+function RecordMsg({ record, sources, onComposerFill }: RecordMsgProps) {
   const time = new Intl.DateTimeFormat("vi-VN", {
     hour: "2-digit",
     minute: "2-digit",
@@ -137,15 +185,16 @@ function RecordMsg({ record }: { record: MessageRecord }) {
   }
 
   if (record.role === "assistant") {
+    const safetyData = record.safety as SafetyPayload | null | undefined;
     const synthetic: ChatResponse = {
       conversation_id: "",
       message_id: record.id,
       status: "success",
       response_type: record.response_type ?? "text",
       answer: record.content,
-      data: null,
-      sources: [],
-      safety: record.safety ?? {
+      data: record.data ?? null,
+      sources: sources ?? record.sources ?? [],
+      safety: safetyData ?? {
         level: "normal",
         requires_emergency_notice: false,
         disclaimer: "Thông tin chỉ mang tính chất tham khảo.",
@@ -158,8 +207,15 @@ function RecordMsg({ record }: { record: MessageRecord }) {
         source_count: (record.metadata?.source_count as number) ?? 0,
         cypher: null,
       },
+      feedback: record.feedback ?? null,
     };
-    return <AssistantMsg response={synthetic} time={time} />;
+    return (
+      <AssistantMsg
+        response={synthetic}
+        time={time}
+        onComposerFill={onComposerFill}
+      />
+    );
   }
 
   return null;
@@ -212,6 +268,8 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
     messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
   }, []);
 
+  // ── Load conversation history from backend ──────────────────────────────
+
   const loadDetail = useCallback(async () => {
     setLoadState("loading");
     setLoadError(null);
@@ -219,12 +277,15 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
     try {
       const detail = await getConversation(conversation.id);
       setMessages(
-        detail.messages.map((m) => ({ kind: "record" as const, data: m }))
+        detail.messages.map((m) => ({
+          kind: "record" as const,
+          data: m,
+          sources: m.sources ?? [],
+        }))
       );
       setLoadState("ready");
     } catch (err: unknown) {
-      const apiErr = err as { message?: string; error_code?: string };
-      setLoadError(apiErr.message ?? "Không thể tải hội thoại.");
+      setLoadError(friendlyError(err));
       setLoadState("error");
     }
   }, [conversation.id]);
@@ -235,13 +296,22 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
     scrollToBottom(messages.length <= 1 ? "instant" : "smooth");
   }, [messages, scrollToBottom]);
 
-  // Auto-resize textarea
+  // ── Auto-resize textarea ────────────────────────────────────────────────
+
   function handleTextareaChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setQuestion(e.target.value);
     const el = e.target;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }
+
+  /** Pre-fill composer from disambiguation / suggested questions */
+  function fillComposer(text: string) {
+    setQuestion(text);
+    setTimeout(() => textareaRef.current?.focus(), 50);
+  }
+
+  // ── Send message ────────────────────────────────────────────────────────
 
   async function handleSubmit(e?: FormEvent) {
     e?.preventDefault();
@@ -255,6 +325,7 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
     }
     setIsSending(true);
 
+    // Optimistic user message + pending placeholder
     setMessages((prev) => [
       ...prev,
       { kind: "optimistic-user", id: crypto.randomUUID(), content: trimmed, createdAt: now },
@@ -275,11 +346,13 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
               role: "assistant",
               content: response.answer,
               response_type: response.response_type,
-              data: null,
+              data: response.data ?? null,
               safety: response.safety,
               metadata: response.metadata as unknown as Record<string, unknown>,
               created_at: new Date().toISOString(),
             },
+            // Preserve the full ChatResponse sources so SourcePanel works
+            sources: response.sources ?? [],
           },
         ];
       });
@@ -291,7 +364,7 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
           {
             kind: "error",
             id: crypto.randomUUID(),
-            content: (err as { message?: string }).message ?? "Không nhận được phản hồi.",
+            content: friendlyError(err),
           },
         ];
       });
@@ -333,10 +406,25 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
         {loadState === "ready" && hasMessages && (
           <div className="chat-messages-inner">
             {messages.map((msg, idx) => {
-              if (msg.kind === "record") return <RecordMsg key={msg.data.id} record={msg.data} />;
-              if (msg.kind === "optimistic-user") return <UserMsg key={msg.id} content={msg.content} time={msg.createdAt} />;
-              if (msg.kind === "optimistic-sending") return <PendingMsg key={`pending-${idx}`} />;
-              if (msg.kind === "error") return <ErrorMsg key={msg.id} content={msg.content} />;
+              if (msg.kind === "record") {
+                return (
+                  <RecordMsg
+                    key={msg.data.id}
+                    record={msg.data}
+                    sources={msg.sources}
+                    onComposerFill={fillComposer}
+                  />
+                );
+              }
+              if (msg.kind === "optimistic-user") {
+                return <UserMsg key={msg.id} content={msg.content} time={msg.createdAt} />;
+              }
+              if (msg.kind === "optimistic-sending") {
+                return <PendingMsg key={`pending-${idx}`} />;
+              }
+              if (msg.kind === "error") {
+                return <ErrorMsg key={msg.id} content={msg.content} />;
+              }
               return null;
             })}
             <div ref={messagesEndRef} />
@@ -373,7 +461,11 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
             />
             <div className="composer-bar">
               <span className="composer-hint">
-                {question.length > 0 ? `${question.length}/2000` : ""}
+                {isSending
+                  ? "Đang gửi…"
+                  : question.length > 0
+                  ? `${question.length}/2000`
+                  : ""}
               </span>
               <button
                 id="chat-send-btn"

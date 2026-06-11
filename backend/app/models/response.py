@@ -39,11 +39,13 @@ class QueryResponse(BaseModel):
 class ServiceStatus(BaseModel):
     """Status of an individual service component."""
 
-    database: str = Field(default="unknown")
-    llm_server: str = Field(default="unknown")
-    embedding_server: str = Field(default="unknown")
-    lightrag: str = Field(default="unknown")
-    api: str = Field(default="running")
+    api: str = Field(default="running", description="FastAPI backend process status")
+    supabase_postgres: str = Field(default="unknown", description="Supabase Postgres connectivity")
+    neo4j: str = Field(default="unknown", description="Neo4j knowledge graph connectivity")
+    ai_engine: str = Field(default="unknown", description="AI engine module and config status")
+    llm_server: str = Field(default="unknown", description="LLM server reachability (LightRAG)")
+    embedding_server: str = Field(default="unknown", description="Embedding server reachability (LightRAG)")
+    lightrag: str = Field(default="unknown", description="LightRAG instance status")
 
 
 class HealthResponse(BaseModel):

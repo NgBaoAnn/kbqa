@@ -66,6 +66,11 @@ def _decode_base64url_bytes(value: str) -> bytes:
 
 
 def _fetch_supabase_jwks() -> dict[str, Any]:
+    """Synchronous JWKS fetch — kept for internal/test use only.
+
+    In production request paths use ``_fetch_supabase_jwks_async()`` instead
+    so that the blocking HTTP call does not stall the FastAPI event loop.
+    """
     global _jwks_cache, _jwks_cache_expires_at
 
     now = time.time()
@@ -110,6 +115,57 @@ def _fetch_supabase_jwks() -> dict[str, Any]:
     _jwks_cache_expires_at = now + 300
     return jwks
 
+
+async def _fetch_supabase_jwks_async() -> dict[str, Any]:
+    """Async JWKS fetch — used by request-path dependencies.
+
+    Uses ``httpx.AsyncClient`` to avoid blocking the event loop. Results are
+    cached in the same module-level ``_jwks_cache`` dict as the sync variant,
+    with a 5-minute TTL.
+    """
+    global _jwks_cache, _jwks_cache_expires_at
+
+    now = time.time()
+    if _jwks_cache is not None and now < _jwks_cache_expires_at:
+        return _jwks_cache
+
+    if not SUPABASE_URL:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "SUPABASE_AUTH_NOT_CONFIGURED",
+                "message": "Backend is missing SUPABASE_URL.",
+            },
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+            )
+            response.raise_for_status()
+            jwks = response.json()
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "SUPABASE_JWKS_UNAVAILABLE",
+                "message": "Unable to fetch Supabase JWT signing keys.",
+            },
+        ) from exc
+
+    if not isinstance(jwks, dict) or not isinstance(jwks.get("keys"), list):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "SUPABASE_JWKS_INVALID",
+                "message": "Supabase JWT signing keys response is invalid.",
+            },
+        )
+
+    _jwks_cache = jwks
+    _jwks_cache_expires_at = now + 300
+    return jwks
 
 def _find_jwk(header: dict[str, Any]) -> dict[str, Any]:
     kid = header.get("kid")
@@ -227,9 +283,18 @@ def verify_supabase_access_token(token: str) -> CurrentUser:
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> CurrentUser:
-    """Require a valid Supabase Bearer token and active app profile."""
+    """Require a valid Supabase Bearer token and active app profile.
+
+    JWKS keys are fetched via async HTTP client (``_fetch_supabase_jwks_async``)
+    to avoid blocking the FastAPI event loop on I/O.
+    """
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise _auth_error("Missing Bearer token.")
+
+    # Pre-warm the JWKS cache using the async client before entering the
+    # sync verify path so that the network call is non-blocking.
+    if _jwks_cache is None or time.time() >= _jwks_cache_expires_at:
+        await _fetch_supabase_jwks_async()
 
     token_user = verify_supabase_access_token(credentials.credentials)
 

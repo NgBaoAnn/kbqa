@@ -1,4 +1,4 @@
-"""Conversation API contract stubs."""
+"""Conversation API — create, list, retrieve conversations and send messages."""
 
 from fastapi import APIRouter, Body, Depends, Path
 
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
     response_model=ConversationSummary,
     status_code=201,
     summary="Create Conversation",
-    responses={501: {"description": "Contract stub, not implemented yet"}},
+    responses={404: {"description": "Conversation not found"}},
 )
 async def create_conversation(
     payload: ConversationCreateRequest = Body(...),
@@ -33,7 +33,7 @@ async def create_conversation(
     "",
     response_model=list[ConversationSummary],
     summary="List Conversations",
-    responses={501: {"description": "Contract stub, not implemented yet"}},
+    responses={404: {"description": "Conversation not found"}},
 )
 async def list_conversations(current_user: CurrentUser = Depends(get_current_user)):
     return await chat_service.list_conversations(user_id=current_user.id)
@@ -43,7 +43,7 @@ async def list_conversations(current_user: CurrentUser = Depends(get_current_use
     "/{conversation_id}",
     response_model=ConversationDetail,
     summary="Get Conversation Detail",
-    responses={501: {"description": "Contract stub, not implemented yet"}},
+    responses={404: {"description": "Conversation not found"}},
 )
 async def get_conversation(
     conversation_id: str = Path(..., description="Conversation UUID"),
@@ -60,7 +60,7 @@ async def get_conversation(
     response_model=ChatResponse,
     status_code=201,
     summary="Send Message To Conversation",
-    responses={501: {"description": "Contract stub, not implemented yet"}},
+    responses={404: {"description": "Conversation not found"}},
 )
 async def create_message(
     conversation_id: str = Path(..., description="Conversation UUID"),

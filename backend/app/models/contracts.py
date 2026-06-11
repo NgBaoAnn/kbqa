@@ -85,6 +85,11 @@ class ConversationSummary(BaseModel):
     )
 
 
+class MessageFeedback(BaseModel):
+    rating: Literal["up", "down"]
+    reason: str | None = None
+
+
 class MessageRecord(BaseModel):
     id: str
     role: Literal["user", "assistant", "system"]
@@ -93,6 +98,7 @@ class MessageRecord(BaseModel):
     data: list[dict[str, Any]] | dict[str, Any] | None = None
     safety: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    feedback: MessageFeedback | None = None
     created_at: str
 
 
@@ -368,6 +374,63 @@ class AdminMetricsResponse(BaseModel):
                 "negative_feedback_rate": 0.08,
                 "engine_usage": {"cypher_direct": 88, "lightrag": 40},
                 "pending_review_count": 3,
+            }
+        }
+    )
+
+
+class ReviewItemRecord(BaseModel):
+    """A single pending review item surfaced from a negative feedback signal."""
+
+    id: str
+    status: Literal["pending", "resolved", "dismissed"]
+    category: str
+    feedback_id: str
+    message_id: str
+    conversation_id: str
+    rating: str
+    reason: str | None = None
+    comment: str | None = None
+    created_at: str
+    # Content context for admin review
+    question_content: str | None = None   # The user question that preceded the answer
+    answer_content: str | None = None     # The assistant answer that was flagged
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+                "status": "pending",
+                "category": "answer_quality",
+                "feedback_id": "99999999-9999-4999-8999-999999999999",
+                "message_id": "44444444-4444-4444-8444-444444444444",
+                "conversation_id": "11111111-1111-4111-8111-111111111111",
+                "rating": "down",
+                "reason": "incorrect",
+                "comment": "Câu trả lời thiếu thông tin.",
+                "created_at": "2026-06-11T09:06:00Z",
+                "question_content": "Triệu chứng bệnh tiểu đường là gì?",
+                "answer_content": "Bệnh tiểu đường có các triệu chứng...",
+            }
+        }
+    )
+
+
+class ReviewQueueResponse(BaseModel):
+    """Paginated list of review items for the admin review queue."""
+
+    items: list[ReviewItemRecord]
+    total: int
+    limit: int
+    offset: int
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "items": [ReviewItemRecord.model_config["json_schema_extra"]["example"]],
+                "total": 1,
+                "limit": 20,
+                "offset": 0,
             }
         }
     )

@@ -71,33 +71,39 @@ def _conversation_summary(row: dict[str, Any]) -> ConversationSummary:
 
 
 def _message_record(row: dict[str, Any]) -> MessageRecord:
-    return MessageRecord(**row)
+    r = dict(row)
+    rating = r.pop("feedback_rating", None)
+    reason = r.pop("feedback_reason", None)
+    if rating:
+        r["feedback"] = {"rating": rating, "reason": reason}
+    return MessageRecord(**r)
 
 
 def _persist_message_sources(
     db: SupabaseDatabase,
+    conn: Any,
     message_id: str,
     ai_result: AIServiceResult,
 ) -> None:
     """Insert one row into public.message_sources per ChatSource in ai_result.
 
-    Each source's metadata dict is serialized to JSONB.  Secret keys are already
-    stripped by source_policy before reaching here, so no additional sanitisation
-    is needed.
+    Must be called within an active ``db.transaction()`` block so that source
+    rows are committed or rolled back together with the assistant message.
     """
-    for source in ai_result.sources:
-        db.execute(
-            """
-            insert into public.message_sources (
-                message_id,
-                source_type,
-                title,
-                snippet,
-                metadata,
-                rank
-            )
-            values (%s, %s, %s, %s, %s::jsonb, %s)
-            """,
+    db.execute_many_in_tx(
+        conn,
+        """
+        insert into public.message_sources (
+            message_id,
+            source_type,
+            title,
+            snippet,
+            metadata,
+            rank
+        )
+        values (%s, %s, %s, %s, %s::jsonb, %s)
+        """,
+        [
             (
                 message_id,
                 source.source_type,
@@ -105,39 +111,38 @@ def _persist_message_sources(
                 source.snippet or "",
                 json.dumps(source.metadata),
                 source.rank,
-            ),
-        )
+            )
+            for source in ai_result.sources
+        ],
+    )
 
 
 def _persist_query_log(
     db: SupabaseDatabase,
+    conn: Any,
     message_id: str,
     ai_result: AIServiceResult,
     ai_called: bool,
 ) -> None:
     """Insert one row into public.query_logs for the AI call.
 
-    raw_engine_metadata is used here so the log reflects what the pipeline
-    actually returned, not the normalised ChatMetadata.  Crucially it must NOT
-    contain secrets — that guarantee comes from ai_service which never puts
-    credentials in raw_engine_metadata.
+    Must be called within an active ``db.transaction()`` block so that the log
+    row is committed or rolled back together with the assistant message.
     """
     meta = ai_result.metadata
-    # Determine status: if the pipeline returned an error, log it as 'error'
     raw = ai_result.raw_engine_metadata
     query_status = "error" if raw.get("error_code") else "success"
 
-    # Build clean log metadata — exclude any key that looks like a secret
     log_meta: dict[str, Any] = {
         "sprint": 2,
         "ai_called": ai_called,
         "query_mode": meta.query_mode,
     }
-    # Include error_code if present (helpful for debugging, not a secret)
     if raw.get("error_code"):
         log_meta["error_code"] = raw["error_code"]
 
-    db.execute(
+    db.execute_in_tx(
+        conn,
         """
         insert into public.query_logs (
             message_id,
@@ -224,13 +229,24 @@ async def get_conversation(
         raise _not_found()
 
     messages = db.fetch_all(
-        f"""
-        select {MESSAGE_COLUMNS}
-        from public.messages
-        where conversation_id = %s
-        order by created_at asc
+        """
+        select 
+            m.id::text as id,
+            m.role,
+            m.content,
+            m.response_type,
+            m.data,
+            m.safety,
+            m.metadata,
+            m.created_at::text as created_at,
+            f.rating as feedback_rating,
+            f.reason as feedback_reason
+        from public.messages m
+        left join public.feedback f on f.message_id = m.id and f.user_id = %s
+        where m.conversation_id = %s
+        order by m.created_at asc
         """,
-        (conversation_id,),
+        (user_id, conversation_id),
     )
     return ConversationDetail(
         conversation=_conversation_summary(conversation),
@@ -295,48 +311,54 @@ async def create_message(
         conversation_id=conversation_id,
     )
 
-    # ── Step 4: Persist assistant message ─────────────────────────────────
-    # json.dumps(None) produces the string "null" which is valid JSONB.
-    data_json = json.dumps(ai_result.data)
-    assistant_row = db.fetch_one(
-        f"""
-        insert into public.messages (
-            conversation_id,
-            role,
-            content,
-            response_type,
-            data,
-            safety,
-            metadata
+    # ── Step 4-7: Atomic persist of AI result ─────────────────────────────
+    # All writes after AI call are wrapped in a single transaction so that
+    # if any step fails, the DB is left in a consistent state (no orphaned
+    # assistant messages without sources/query_logs).
+    data_json = json.dumps(ai_result.data)  # json.dumps(None) → "null", valid JSONB
+    with db.transaction() as conn:
+        # Step 4: Persist assistant message
+        assistant_row = db.fetch_one_in_tx(
+            conn,
+            f"""
+            insert into public.messages (
+                conversation_id,
+                role,
+                content,
+                response_type,
+                data,
+                safety,
+                metadata
+            )
+            values (%s, 'assistant', %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
+            returning {MESSAGE_COLUMNS}
+            """,
+            (
+                conversation_id,
+                ai_result.answer,
+                ai_result.response_type,
+                data_json,
+                ai_result.safety.model_dump_json(),
+                ai_result.metadata.model_dump_json(),
+            ),
         )
-        values (%s, 'assistant', %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
-        returning {MESSAGE_COLUMNS}
-        """,
-        (
-            conversation_id,
-            ai_result.answer,
-            ai_result.response_type,
-            data_json,
-            ai_result.safety.model_dump_json(),
-            ai_result.metadata.model_dump_json(),
-        ),
-    )
-    if assistant_row is None:
-        raise RuntimeError("Failed to persist assistant message.")
+        if assistant_row is None:
+            raise RuntimeError("Failed to persist assistant message.")
 
-    assistant_message_id = assistant_row["id"]
+        assistant_message_id = assistant_row["id"]
 
-    # ── Step 5: Persist message_sources ───────────────────────────────────
-    _persist_message_sources(db, assistant_message_id, ai_result)
+        # Step 5: Persist message_sources
+        _persist_message_sources(db, conn, assistant_message_id, ai_result)
 
-    # ── Step 6: Persist query_log ─────────────────────────────────────────
-    _persist_query_log(db, assistant_message_id, ai_result, ai_called=True)
+        # Step 6: Persist query_log
+        _persist_query_log(db, conn, assistant_message_id, ai_result, ai_called=True)
 
-    # ── Step 7: Update conversation timestamp ─────────────────────────────
-    db.execute(
-        "update public.conversations set updated_at = timezone('utc', now()) where id = %s",
-        (conversation_id,),
-    )
+        # Step 7: Update conversation timestamp
+        db.execute_in_tx(
+            conn,
+            "update public.conversations set updated_at = timezone('utc', now()) where id = %s",
+            (conversation_id,),
+        )
 
     # ── Step 8: Build and return ChatResponse ─────────────────────────────
     return ChatResponse(

@@ -1,4 +1,4 @@
-"""Knowledge explorer API contract stubs."""
+"""Knowledge explorer API — list and search diseases from the VietMedKG graph."""
 
 from fastapi import APIRouter, Query
 
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
     "/diseases",
     response_model=DiseaseListResponse,
     summary="List/Search Diseases",
-    responses={501: {"description": "Contract stub, not implemented yet"}},
+    responses={404: {"description": "Disease not found"}},
 )
 async def list_diseases(
     q: str | None = Query(default=None, description="Optional disease name search term"),
@@ -23,11 +23,12 @@ async def list_diseases(
 
 
 @router.get(
-    "/diseases/{disease_id}",
+    "/diseases/{disease_id:path}",
     response_model=DiseaseDetailResponse,
     summary="Get Disease Detail",
-    responses={501: {"description": "Contract stub, not implemented yet"}},
+    responses={404: {"description": "Disease not found"}},
 )
 async def get_disease(disease_id: str):
-    return await knowledge_service.get_disease(disease_id=disease_id)
+    from urllib.parse import unquote
+    return await knowledge_service.get_disease(disease_id=unquote(disease_id))
 
