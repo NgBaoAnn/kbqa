@@ -3,21 +3,22 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from fastapi import HTTPException, status
 
 from app.database import SupabaseDatabase, get_database
 from app.models.contracts import (
-    ChatMetadata,
     ChatResponse,
     ConversationCreateRequest,
     ConversationDetail,
     ConversationSummary,
     MessageCreateRequest,
     MessageRecord,
-    SafetyPayload,
 )
+
+logger = logging.getLogger(__name__)
 
 
 CONVERSATION_COLUMNS = """
@@ -58,12 +59,7 @@ def _message_record(row: dict[str, Any]) -> MessageRecord:
     return MessageRecord(**row)
 
 
-def _mock_answer(question: str) -> str:
-    return (
-        "Đây là phản hồi thử nghiệm của AegisHealth trong Sprint 1. "
-        "Hệ thống đã lưu câu hỏi của bạn và chưa gọi AI thật ở giai đoạn này. "
-        f"Nội dung cần xử lý: {question}"
-    )
+
 
 
 async def create_conversation(
@@ -154,6 +150,7 @@ async def create_message(
     if conversation is None:
         raise _not_found()
 
+    # ── Persist user message ───────────────────────────────────────────────
     db.fetch_one(
         f"""
         insert into public.messages (conversation_id, role, content, metadata)
@@ -167,43 +164,66 @@ async def create_message(
         ),
     )
 
-    safety = SafetyPayload()
-    metadata = ChatMetadata(
-        engine="mock",
-        query_mode=payload.mode or "mock:sprint1",
-        execution_time_ms=0,
-        source_count=0,
-        cypher=None,
-    )
-    answer = _mock_answer(payload.question)
-    assistant_row = db.fetch_one(
+    # ── Reserve assistant message row to get its id for ai_service ────────
+    placeholder_row = db.fetch_one(
         f"""
         insert into public.messages (
-            conversation_id,
-            role,
-            content,
-            response_type,
-            data,
-            safety,
-            metadata
+            conversation_id, role, content, response_type, metadata
         )
-        values (%s, 'assistant', %s, 'text', null, %s::jsonb, %s::jsonb)
+        values (%s, 'assistant', '', 'text', '{{}}'::jsonb)
         returning {MESSAGE_COLUMNS}
         """,
+        (conversation_id,),
+    )
+    if placeholder_row is None:
+        raise RuntimeError("Failed to reserve assistant message row.")
+    message_id: str = placeholder_row["id"]
+
+    # ── Call real AI pipeline ──────────────────────────────────────────────
+    from app.services import ai_service
+
+    logger.info(
+        "chat_service: invoking ai_service for conversation=%s message=%s",
+        conversation_id,
+        message_id,
+    )
+    chat_response = await ai_service.answer_question(
+        conversation_id=conversation_id,
+        message_id=message_id,
+        question=payload.question,
+        mode=payload.mode,
+    )
+
+    # ── Persist real answer into the reserved row ──────────────────────────
+    safety_json = chat_response.safety.model_dump_json()
+    metadata_json = chat_response.metadata.model_dump_json()
+
+    db.execute(
+        """
+        update public.messages
+        set
+            content       = %s,
+            response_type = %s,
+            safety        = %s::jsonb,
+            metadata      = %s::jsonb
+        where id = %s
+        """,
         (
-            conversation_id,
-            answer,
-            safety.model_dump_json(),
-            metadata.model_dump_json(),
+            chat_response.answer,
+            chat_response.response_type,
+            safety_json,
+            metadata_json,
+            message_id,
         ),
     )
-    if assistant_row is None:
-        raise RuntimeError("Failed to persist assistant message.")
 
+    # ── Update conversation timestamp ──────────────────────────────────────
     db.execute(
         "update public.conversations set updated_at = timezone('utc', now()) where id = %s",
         (conversation_id,),
     )
+
+    # ── Write query log ────────────────────────────────────────────────────
     db.execute(
         """
         insert into public.query_logs (
@@ -215,24 +235,16 @@ async def create_message(
             status,
             metadata
         )
-        values (%s, 'mock', %s, 0, 0, 'success', %s::jsonb)
+        values (%s, %s, %s, %s, %s, 'success', %s::jsonb)
         """,
         (
-            assistant_row["id"],
-            metadata.query_mode,
-            json.dumps({"sprint": 1, "ai_called": False}),
+            message_id,
+            chat_response.metadata.engine,
+            chat_response.metadata.query_mode,
+            chat_response.metadata.execution_time_ms,
+            chat_response.metadata.source_count,
+            json.dumps({"ai_called": True}),
         ),
     )
 
-    return ChatResponse(
-        conversation_id=conversation_id,
-        message_id=assistant_row["id"],
-        status="success",
-        response_type="text",
-        answer=answer,
-        data=None,
-        sources=[],
-        safety=safety,
-        suggested_questions=[],
-        metadata=metadata,
-    )
+    return chat_response
