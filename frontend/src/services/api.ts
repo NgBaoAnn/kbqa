@@ -11,17 +11,21 @@
 
 import { getAccessToken } from "./supabase";
 import type {
+  AdminMetricsResponse,
   ChatResponse,
   ConversationCreateRequest,
   ConversationDetail,
   ConversationSummary,
   CurrentUserResponse,
+  DiseaseDetailResponse,
+  DiseaseListResponse,
   FeedbackCreateRequest,
   FeedbackResponse,
   HealthResponse,
   MessageCreateRequest,
   QueryRequest,
   QueryResponse,
+  ReviewQueueResponse,
 } from "../types/api";
 
 const API_BASE_URL =
@@ -162,3 +166,48 @@ export async function queryMedical(payload: QueryRequest): Promise<QueryResponse
     authenticated: false,
   });
 }
+
+// ── Knowledge ─────────────────────────────────────────────────────────────────
+
+/** GET /api/v1/knowledge/diseases?q=&limit=&offset= — unauthenticated */
+export async function listDiseases(
+  q: string | null,
+  limit = 20,
+  offset = 0,
+): Promise<DiseaseListResponse> {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+  return request<DiseaseListResponse>(`/api/v1/knowledge/diseases?${params}`, {
+    authenticated: false,
+  });
+}
+
+/** GET /api/v1/knowledge/diseases/:id — unauthenticated */
+export async function getDiseaseDetail(id: string): Promise<DiseaseDetailResponse> {
+  return request<DiseaseDetailResponse>(
+    `/api/v1/knowledge/diseases/${encodeURIComponent(id)}`,
+    { authenticated: false },
+  );
+}
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+/** GET /api/v1/admin/metrics — requires admin role */
+export async function getAdminMetrics(): Promise<AdminMetricsResponse> {
+  return request<AdminMetricsResponse>("/api/v1/admin/metrics");
+}
+
+/** GET /api/v1/admin/review-items?limit=&offset= — requires admin role */
+export async function getReviewQueue(
+  limit = 20,
+  offset = 0,
+): Promise<ReviewQueueResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return request<ReviewQueueResponse>(`/api/v1/admin/review-items?${params}`);
+}
+

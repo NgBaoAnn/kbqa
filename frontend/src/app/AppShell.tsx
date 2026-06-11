@@ -6,18 +6,35 @@
  *  │ Dark sidebar│ Light main area                    │
  *  │ - Brand     │                                    │
  *  │ - New chat  │  ┌──────────────────────────────┐  │
- *  │ - Conv list │  │  Chat panel / Welcome        │  │
- *  │             │  └──────────────────────────────┘  │
+ *  │ - Conv list │  │  Chat / Knowledge / Admin    │  │
+ *  │ - Nav links │  └──────────────────────────────┘  │
  *  │ - User info │                                    │
  *  └─────────────┴────────────────────────────────────┘
+ *
+ * Sprint 3 additions:
+ *  - Nav links: "Tra cứu bệnh" (knowledge), "Quản trị" (admin, role=admin only)
+ *  - view state: "chat" | "knowledge" | "admin"
  */
 
 import { useState, useEffect, useRef } from "react";
-import { Bot, Menu, Plus, ShieldCheck, X, Moon, Sun } from "lucide-react";
+import {
+  BookOpen,
+  Menu,
+  Moon,
+  Plus,
+  ShieldAlert,
+  ShieldCheck,
+  Sun,
+  X,
+} from "lucide-react";
 import { useAuth } from "../features/auth/AuthContext";
 import { ConversationSidebar } from "../features/chat/ConversationSidebar";
 import { ChatPanel } from "../features/chat/ChatPanel";
+import { KnowledgeExplorer } from "../features/knowledge/KnowledgeExplorer";
+import { AdminDashboard } from "../features/admin/AdminDashboard";
 import type { ConversationSummary } from "../types/api";
+
+type AppView = "chat" | "knowledge" | "admin";
 
 function WelcomePane() {
   return (
@@ -43,6 +60,7 @@ export function AppShell() {
     () => window.innerWidth >= 768
   );
   const [newChatTrigger, setNewChatTrigger] = useState(0);
+  const [view, setView] = useState<AppView>("chat");
   const overlayRef = useRef<HTMLDivElement>(null);
 
   // Theme management
@@ -74,22 +92,53 @@ export function AppShell() {
 
   function handleSelect(conv: ConversationSummary) {
     setActiveConversation(conv);
+    setView("chat");
     if (window.innerWidth < 768) setSidebarOpen(false);
   }
 
   function handleCreated(conv: ConversationSummary) {
     setActiveConversation(conv);
+    setView("chat");
     if (window.innerWidth < 768) setSidebarOpen(false);
   }
 
   function triggerNewChat() {
+    setView("chat");
     setNewChatTrigger((n) => n + 1);
+    if (window.innerWidth < 768) setSidebarOpen(false);
+  }
+
+  function navigateTo(v: AppView) {
+    setView(v);
+    // On mobile, close sidebar when navigating to a feature view
     if (window.innerWidth < 768) setSidebarOpen(false);
   }
 
   const userInitial = (user?.display_name ?? user?.email ?? "U")
     .charAt(0)
     .toUpperCase();
+
+  const isAdmin = user?.role === "admin";
+
+  // Main content renderer
+  function renderMain() {
+    if (view === "knowledge") {
+      return <KnowledgeExplorer />;
+    }
+    if (view === "admin" && isAdmin) {
+      return <AdminDashboard />;
+    }
+    // Default: chat view
+    if (activeConversation) {
+      return (
+        <ChatPanel
+          key={activeConversation.id}
+          conversation={activeConversation}
+        />
+      );
+    }
+    return <WelcomePane />;
+  }
 
   return (
     <>
@@ -128,7 +177,7 @@ export function AppShell() {
         {/* ── Sidebar ── */}
         <aside
           className={`sidebar${sidebarOpen ? " sidebar--open" : ""}`}
-          aria-label="Danh sách hội thoại"
+          aria-label="Điều hướng"
         >
           {/* Brand row */}
           <div className="sidebar-top">
@@ -155,11 +204,39 @@ export function AppShell() {
 
           {/* Conversation list */}
           <ConversationSidebar
-            activeId={activeConversation?.id ?? null}
+            activeId={view === "chat" ? (activeConversation?.id ?? null) : null}
             onSelect={handleSelect}
             onCreated={handleCreated}
             newChatTrigger={newChatTrigger}
           />
+
+          {/* ── Nav links (Sprint 3) ── */}
+          <nav className="sidebar-nav" aria-label="Tính năng">
+            <div className="sidebar-section-label">Tính năng</div>
+            <button
+              id="nav-knowledge-btn"
+              type="button"
+              className={`nav-item${view === "knowledge" ? " nav-item--active" : ""}`}
+              onClick={() => navigateTo("knowledge")}
+              aria-current={view === "knowledge" ? "page" : undefined}
+            >
+              <BookOpen size={15} className="nav-item-icon" />
+              Tra cứu bệnh
+            </button>
+
+            {isAdmin && (
+              <button
+                id="nav-admin-btn"
+                type="button"
+                className={`nav-item${view === "admin" ? " nav-item--active" : ""}`}
+                onClick={() => navigateTo("admin")}
+                aria-current={view === "admin" ? "page" : undefined}
+              >
+                <ShieldAlert size={15} className="nav-item-icon" />
+                Quản trị
+              </button>
+            )}
+          </nav>
 
           {/* User footer */}
           <div className="sidebar-footer">
@@ -208,14 +285,7 @@ export function AppShell() {
 
         {/* ── Main content ── */}
         <main className="shell-main" aria-label="Vùng nội dung chính">
-          {activeConversation ? (
-            <ChatPanel
-              key={activeConversation.id}
-              conversation={activeConversation}
-            />
-          ) : (
-            <WelcomePane />
-          )}
+          {renderMain()}
         </main>
       </div>
     </>
