@@ -1,0 +1,63 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: ec2-production-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy production
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Validate required secrets
+        env:
+          AWS_EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
+          AWS_EC2_SSH_KEY: ${{ secrets.AWS_EC2_SSH_KEY }}
+        run: |
+          test -n "$AWS_EC2_HOST" || { echo "Missing secret: AWS_EC2_HOST"; exit 1; }
+          test -n "$AWS_EC2_SSH_KEY" || { echo "Missing secret: AWS_EC2_SSH_KEY"; exit 1; }
+
+      - name: Prepare SSH
+        env:
+          AWS_EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
+          AWS_EC2_PORT: ${{ secrets.AWS_EC2_PORT }}
+          AWS_EC2_SSH_KEY: ${{ secrets.AWS_EC2_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          port="${AWS_EC2_PORT:-22}"
+
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$AWS_EC2_SSH_KEY" > "$HOME/.ssh/kbqa_ec2_key"
+          chmod 600 "$HOME/.ssh/kbqa_ec2_key"
+
+          ssh-keyscan -p "$port" -H "$AWS_EC2_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Deploy on EC2
+        env:
+          AWS_EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
+          AWS_EC2_PORT: ${{ secrets.AWS_EC2_PORT }}
+          AWS_EC2_USER: ${{ secrets.AWS_EC2_USER }}
+          AWS_EC2_APP_DIR: ${{ secrets.AWS_EC2_APP_DIR }}
+          AWS_EC2_DEPLOY_BRANCH: ${{ secrets.AWS_EC2_DEPLOY_BRANCH }}
+        run: |
+          set -Eeuo pipefail
+
+          host="$AWS_EC2_HOST"
+          port="${AWS_EC2_PORT:-22}"
+          user="${AWS_EC2_USER:-ubuntu}"
+          app_dir="${AWS_EC2_APP_DIR:-/home/ubuntu/kbqa}"
+          deploy_branch="${AWS_EC2_DEPLOY_BRANCH:-develop}"
+
+          ssh -i "$HOME/.ssh/kbqa_ec2_key" -p "$port" "$user@$host" \
+            "set -Eeuo pipefail; cd '$app_dir'; git fetch origin '$deploy_branch'; git checkout -B '$deploy_branch' 'origin/$deploy_branch'; git reset --hard 'origin/$deploy_branch'; APP_DIR='$app_dir' DEPLOY_BRANCH='$deploy_branch' bash scripts/deploy_ec2.sh"
