@@ -1,8 +1,32 @@
-"""Pydantic contracts for the end-to-end product API."""
+"""Pydantic contracts for the end-to-end product API.
+
+Public API contracts (consumed by router and frontend):
+    CurrentUserResponse, ConversationCreateRequest, ConversationSummary,
+    ConversationDetail, MessageCreateRequest, MessageRecord,
+    ChatResponse, ChatSource, SafetyPayload, ChatMetadata,
+    FeedbackCreateRequest, FeedbackResponse,
+    DiseaseSummary, DiseaseListResponse, DiseaseDetailResponse,
+    AdminMetricsResponse
+
+Internal service contracts (not serialised to HTTP responses directly):
+    AIServiceResult  — returned by ai_service, consumed by chat_service
+"""
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# ── Source type literals ──────────────────────────────────────────────────
+# Extending this list is a non-breaking change (additive).
+ChatSourceType = Literal[
+    "cypher",
+    "neo4j",
+    "lightrag_entity",
+    "lightrag_relationship",
+    "lightrag_chunk",
+    "document",
+    "other",
+]
 
 
 class CurrentUserResponse(BaseModel):
@@ -112,8 +136,15 @@ class MessageCreateRequest(BaseModel):
 
 
 class ChatSource(BaseModel):
+    """A single provenance / citation record attached to an assistant answer.
+
+    ``source_type`` is constrained to known values; use ``"other"`` as a
+    graceful fallback for any engine that is added later without an explicit
+    type mapping.
+    """
+
     id: str
-    source_type: str
+    source_type: ChatSourceType
     title: str
     snippet: str | None = None
     rank: int = 1
@@ -121,12 +152,22 @@ class ChatSource(BaseModel):
 
 
 class SafetyPayload(BaseModel):
+    """Safety classification for a chat response.
+
+    Levels:
+        ``normal``    General informational answer; standard disclaimer.
+        ``caution``   Medical query that may affect health decisions.
+        ``emergency`` Life-threatening situation; requires immediate action.
+    """
+
     level: Literal["normal", "caution", "emergency"] = "normal"
     requires_emergency_notice: bool = False
     disclaimer: str = "Thông tin chỉ mang tính chất tham khảo."
 
 
 class ChatMetadata(BaseModel):
+    """Execution metadata for a chat response; persisted in query_logs."""
+
     engine: str
     query_mode: str
     execution_time_ms: float
@@ -145,6 +186,37 @@ class ChatResponse(BaseModel):
     safety: SafetyPayload = Field(default_factory=SafetyPayload)
     suggested_questions: list[str] = Field(default_factory=list)
     metadata: ChatMetadata
+
+
+# ── Internal service contract ─────────────────────────────────────────────
+
+
+class AIServiceResult(BaseModel):
+    """Internal result model returned by ``ai_service.answer_question()``.
+
+    This is NOT exposed directly as an HTTP response.  ``chat_service`` maps
+    this into a persisted ``ChatResponse`` after saving messages to Supabase.
+
+    Attributes:
+        answer:               The synthesized answer text.
+        response_type:        One of 'text', 'table', 'warning'.
+        data:                 Structured data for table rendering (may be None).
+        sources:              Normalised provenance records.
+        safety:               Safety classification for the answer.
+        suggested_questions:  Follow-up questions (may be empty).
+        metadata:             Execution metadata for query_logs.
+        raw_engine_metadata:  Unprocessed dict from the pipeline (for Người 2
+                              to persist in query_logs without re-computing).
+    """
+
+    answer: str
+    response_type: str
+    data: list[dict[str, Any]] | dict[str, Any] | None = None
+    sources: list[ChatSource] = Field(default_factory=list)
+    safety: SafetyPayload = Field(default_factory=SafetyPayload)
+    suggested_questions: list[str] = Field(default_factory=list)
+    metadata: ChatMetadata
+    raw_engine_metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(
         json_schema_extra={
