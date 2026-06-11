@@ -1,46 +1,83 @@
-import { AlertTriangle, FileText } from "lucide-react";
+/**
+ * ResponseRenderer — renders assistant response by type.
+ * Claude-style: no labels, clean markdown flow.
+ */
+
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { QueryResponse } from "../types/api";
+import { ShieldAlert, AlertTriangle } from "lucide-react";
+import type { ChatResponse, QueryResponse, SafetyPayload } from "../types/api";
 
-interface ResponseRendererProps {
-  response: QueryResponse;
-}
+// ── Safety block ──────────────────────────────────────────────────────────────
 
-function WarningRenderer({ response }: ResponseRendererProps) {
+function SafetyBlock({ safety }: { safety: SafetyPayload }) {
+  if (safety.level === "normal" && !safety.requires_emergency_notice) {
+    return (
+      <p className="safety-disclaimer">{safety.disclaimer}</p>
+    );
+  }
+  const cls =
+    safety.requires_emergency_notice
+      ? "safety-block safety-block--emergency"
+      : "safety-block safety-block--caution";
   return (
-    <div className="response-block warning-response">
-      <div className="response-label">
-        <AlertTriangle size={15} />
-        <span>Cảnh báo y tế</span>
-      </div>
-      <div className="markdown-prose">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{response.answer}</ReactMarkdown>
-      </div>
+    <div className={cls} role="alert">
+      <ShieldAlert size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+      <span>{safety.disclaimer}</span>
     </div>
   );
 }
 
-function TextRenderer({ response }: ResponseRendererProps) {
+// ── Markdown renderer ─────────────────────────────────────────────────────────
+
+function MarkdownBody({ content }: { content: string }) {
+  return (
+    <div className="markdown-prose">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
+  );
+}
+
+// ── Warning response ──────────────────────────────────────────────────────────
+
+function WarningBody({ answer }: { answer: string }) {
+  return (
+    <div className="warning-response">
+      <div className="warning-label">
+        <AlertTriangle size={13} />
+        Cảnh báo y tế
+      </div>
+      <MarkdownBody content={answer} />
+    </div>
+  );
+}
+
+// ── ChatResponseRenderer (new conversation flow) ──────────────────────────────
+
+export function ChatResponseRenderer({ response }: { response: ChatResponse }) {
   return (
     <div className="response-block">
-      <div className="response-label">
-        <FileText size={15} />
-        <span>Trả lời</span>
-      </div>
-      <div className="markdown-prose">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{response.answer}</ReactMarkdown>
-      </div>
+      {response.response_type === "warning" ? (
+        <WarningBody answer={response.answer} />
+      ) : (
+        <MarkdownBody content={response.answer} />
+      )}
+      {response.safety ? <SafetyBlock safety={response.safety} /> : null}
     </div>
   );
 }
 
-export function ResponseRenderer({ response }: ResponseRendererProps) {
-  // We no longer render a raw table. If response_type is "table", 
-  // the data is already nicely formatted in Markdown by the backend.
-  if (response.response_type === "warning") {
-    return <WarningRenderer response={response} />;
-  }
+// ── Legacy ResponseRenderer (old /query endpoint) ─────────────────────────────
 
-  return <TextRenderer response={response} />;
+/** @deprecated Use ChatResponseRenderer for conversation flow. */
+export function ResponseRenderer({ response }: { response: QueryResponse }) {
+  return (
+    <div className="response-block">
+      {response.response_type === "warning" ? (
+        <WarningBody answer={response.answer} />
+      ) : (
+        <MarkdownBody content={response.answer} />
+      )}
+    </div>
+  );
 }
