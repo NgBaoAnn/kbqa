@@ -53,13 +53,30 @@ EFFECTIVE_QUERY_MODE = "naive" if FORCE_LIGHTRAG_NAIVE_MODE else DEFAULT_QUERY_M
 #   - Prohibit medication dosage advice (liability)
 #   - Prefer concise, structured answers (3B models tend to be verbose)
 #   - Suppress References section (our response_formatter.py handles disclaimers)
-MEDICAL_USER_PROMPT = (
-    "Bạn là trợ lý y tế AegisHealth. "
-    "Luôn trả lời bằng tiếng Việt, bất kể ngôn ngữ câu hỏi. "
-    "Câu trả lời phải ngắn gọn, súc tích, dùng danh sách gạch đầu dòng khi phù hợp. "
-    "KHÔNG đề xuất liều lượng thuốc cụ thể. "
-    "KHÔNG tạo mục References ở cuối câu trả lời."
-)
+MEDICAL_USER_PROMPT = "Luôn trả lời bằng tiếng Việt. Không đề xuất liều lượng thuốc."
+
+# ── Bắt buộc ghi đè Core Prompt của LightRAG để chống lỗi tiếng Anh ở model 3B ──
+try:
+    import lightrag.prompt as p
+    
+    vi_prompt_base = """Bạn là trợ lý y tế AegisHealth. Nhiệm vụ của bạn là trả lời câu hỏi của người dùng một cách chính xác bằng tiếng Việt, CHỈ dựa trên thông tin được cung cấp trong phần **Context**.
+
+---Hướng dẫn---
+1. Luôn luôn trả lời bằng ngôn ngữ Tiếng Việt (Vietnamese).
+2. Nếu thông tin trong Context không có đáp án, hãy trả lời đúng một câu: "Xin lỗi, dữ liệu hiện tại không đủ thông tin để trả lời câu hỏi này." Không giải thích thêm.
+3. Sử dụng gạch đầu dòng (-) và in đậm (**) những ý chính. Câu trả lời phải ngắn gọn.
+4. Chỉ liệt kê các thông tin có sẵn trong Context. TUYỆT ĐỐI KHÔNG tự ý giải thích lý do, KHÔNG phân tích thành phần dinh dưỡng hay thêm thắt kiến thức y khoa bên ngoài.
+5. Không tạo mục "References" hay chèn các thẻ [1], [2] vào cuối câu trả lời.
+
+---Lưu ý bổ sung---
+{user_prompt}
+
+---Context---
+"""
+    p.PROMPTS["rag_response"] = vi_prompt_base + "{context_data}\n"
+    p.PROMPTS["naive_rag_response"] = vi_prompt_base + "{content_data}\n"
+except ImportError:
+    pass
 
 
 async def get_lightrag_instance():
@@ -267,6 +284,11 @@ async def query(
             mode=effective_mode,
             only_need_context=only_need_context,
             user_prompt=MEDICAL_USER_PROMPT,
+            top_k=20,                  # Limit number of entities (Default is 40)
+            chunk_top_k=10,            # Limit number of text chunks (Default is 20)
+            max_entity_tokens=2000,    # Default is 6000
+            max_relation_tokens=2000,  # Default is 6000
+            max_total_tokens=6000,     # Limit total context size (Default is 30000)
         )
         result = await rag.aquery(question, param=param)
 

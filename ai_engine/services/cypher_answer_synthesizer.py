@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_RECORDS = 5
 _MAX_FIELD_CHARS = 300
-_MAX_PAYLOAD_CHARS = 3000
+_MAX_PAYLOAD_CHARS = 4000
 
 # Map Cypher alias keys → human-readable Vietnamese labels
 _KEY_LABELS: dict[str, str] = {
@@ -65,7 +65,15 @@ _BLOB_FIELDS: frozenset[str] = frozenset({
     "Khoa điều trị",
 })
 
-_MAX_LIST_ITEMS = 15
+_LONG_TEXT_FIELDS: frozenset[str] = frozenset({
+    "Mô tả", "Nguyên nhân",
+})
+
+_LOW_PRIORITY_FIELDS: frozenset[str] = frozenset({
+    "Chi tiết thuốc", "Thực đơn gợi ý", "Nên ăn", "Không nên ăn", "Phòng ngừa"
+})
+
+_MAX_LIST_ITEMS = 5
 
 # disease_category in VietMedKG is a breadcrumb path from the Chinese source.
 # Strip the encyclopedia prefix so the LLM sees only the meaningful specialty segments.
@@ -79,8 +87,23 @@ def _clean_category(value: str) -> str:
 
 
 def _split_blob(value: str) -> list[str] | str:
-    """Split a comma-separated blob into a list if it has >= 2 items."""
-    items = [x.strip() for x in value.split(",") if x.strip()]
+    """Split a comma-separated blob into a deduplicated list if it has >= 2 items.
+
+    Machine-translated source blobs often repeat the same item verbatim
+    (case/spacing aside); drop exact duplicates here so the LLM never lists them
+    twice. Fuzzy near-duplicates are left for the LLM to merge.
+    """
+    seen: set[str] = set()
+    items: list[str] = []
+    for raw in value.split(","):
+        x = raw.strip()
+        if not x:
+            continue
+        key = x.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(x)
     if len(items) >= 2:
         return items[:_MAX_LIST_ITEMS]
     return value
@@ -111,7 +134,10 @@ def _prepare_records_for_llm(records: list[dict]) -> tuple[str, str]:
             label = _KEY_LABELS.get(k, k)
             if label == "Chuyên khoa":
                 s = _clean_category(s)
-            s = s[:_MAX_FIELD_CHARS] + "..." if len(s) > _MAX_FIELD_CHARS else s
+            
+            if label not in _LONG_TEXT_FIELDS:
+                s = s[:_MAX_FIELD_CHARS] + "..." if len(s) > _MAX_FIELD_CHARS else s
+                
             if label in _BLOB_FIELDS:
                 item[label] = _split_blob(s)
             else:
@@ -119,19 +145,20 @@ def _prepare_records_for_llm(records: list[dict]) -> tuple[str, str]:
         if item:
             localized.append(item)
 
-    total = sum(len(str(r)) for r in localized)
-    if total > _MAX_PAYLOAD_CHARS and localized:
-        ratio = _MAX_PAYLOAD_CHARS / total
+    # Semantic Triage: Drop low priority fields if payload is too large
+    while len(json.dumps(localized, ensure_ascii=False)) > _MAX_PAYLOAD_CHARS:
+        dropped_any = False
         for r in localized:
-            for label in list(r.keys()):
-                v = r[label]
-                if isinstance(v, list):
-                    cap = max(3, int(len(v) * ratio))
-                    r[label] = v[:cap]
-                elif isinstance(v, str):
-                    cap = max(50, int(len(v) * ratio))
-                    if len(v) > cap:
-                        r[label] = v[:cap] + "..."
+            for field in list(r.keys()):
+                if field in _LOW_PRIORITY_FIELDS:
+                    del r[field]
+                    dropped_any = True
+        
+        # If no low priority fields left to drop and still too large, drop the last record
+        if not dropped_any and len(localized) > 1:
+            localized.pop()
+        elif not dropped_any:
+            break  # Can't reduce further, keep at least 1 core record
 
     return json.dumps(localized, ensure_ascii=False, indent=2), note
 
@@ -186,25 +213,59 @@ async def synthesize_answer(question: str, records: list[dict]) -> str:
     data_text, note = _prepare_records_for_llm(records)
 
     system_prompt = (
-        "Bạn là trợ lý y khoa AegisHealth. Nhiệm vụ: Dựa vào dữ liệu JSON, hãy viết câu trả lời tiếng Việt thật tự nhiên, mạch lạc và dễ hiểu cho người dùng.\n\n"
+        "Bạn là trợ lý y khoa AegisHealth. Dữ liệu bạn nhận được là kết quả truy vấn thô từ cơ sở tri thức (đôi khi được dịch máy từ tiếng Trung nên câu từ có thể lủng củng, chứa lỗi rác). "
+        "Nhiệm vụ của bạn là biên tập lại phần Dữ liệu thành một câu trả lời tiếng Việt tự nhiên, mạch lạc, chuẩn văn phong y khoa cho người dùng.\n\n"
+        "<core_principle>\n"
+        "Câu trả lời CHỈ được dựa trên phần Dữ liệu. Mọi tên bệnh, tên thuốc, triệu chứng, đối tượng, con số trong câu trả lời PHẢI xuất hiện trong Dữ liệu. "
+        "TUYỆT ĐỐI KHÔNG bịa thêm, KHÔNG suy luận cơ chế y khoa, KHÔNG bổ sung kiến thức bên ngoài. Nếu Dữ liệu thưa, hãy trả lời ngắn — thà thiếu còn hơn bịa.\n"
+        "</core_principle>\n\n"
         "<rules>\n"
-        "1. Trả lời bằng giọng văn thân thiện, trôi chảy, kết nối các ý mềm mại thay vì chỉ liệt kê khô khan.\n"
-        "2. TUYỆT ĐỐI CHỈ dùng thông tin có trong dữ liệu JSON. Không tự sáng tác hay thêm bệnh, thuốc ở ngoài.\n"
-        "3. Lọc bỏ các từ phiên âm vô nghĩa (ví dụ: 'Úc Trác', 'Yan Peng Hui') khỏi câu trả lời.\n"
-        "4. Tên bệnh và tên thuốc cần được in đậm (**) để nổi bật.\n"
+        "1. BIÊN TẬP KHÔNG SUY DIỄN: Được phép sửa lỗi ngữ pháp, sắp xếp lại câu lủng củng do dịch máy cho mạch lạc, NHƯNG phải giữ NGUYÊN nghĩa gốc, giữ nguyên tên bệnh / tên thuốc và mọi con số (vd tỉ lệ khỏi) đúng như trong Dữ liệu — không đổi tên, không làm tròn.\n"
+        "2. LỌC RÁC, KHÔNG BỎ SÓT: Lược bỏ các token phiên âm vô nghĩa hoặc cụm tối nghĩa (như 'Úc Trác', 'Yan Peng Hui', 'Wang Li Li') BÊN TRONG một trường. Tuy nhiên TUYỆT ĐỐI không bỏ sót cả một bản ghi: với câu hỏi tìm ngược / liệt kê (vd 'bệnh nào...'), phải trình bày ĐẦY ĐỦ mọi bệnh có trong Dữ liệu.\n"
+        "3. THIẾU DỮ LIỆU: Nếu một khía cạnh không có trong Dữ liệu, chỉ cần BỎ QUA — không bịa và cũng không thêm câu kiểu 'cơ sở dữ liệu chưa có thông tin'.\n"
+        "4. ĐỊNH DẠNG TRỰC QUAN:\n"
+        "   - Luôn in đậm (**) tên Bệnh và tên Thuốc.\n"
+        "   - Các danh sách (Triệu chứng, Thực phẩm, Thuốc) nên được gạch đầu dòng (-).\n"
+        "   - Trình bày thông tin một cách tự nhiên, liên kết các ý mạch lạc thay vì chỉ liệt kê khô khan.\n"
+        "5. NGỮ ĐIỆU: Chuyên nghiệp, khách quan, trực diện. Trả lời thẳng vào nội dung, KHÔNG mở đầu bằng câu dẫn kiểu 'Dựa trên dữ liệu...'. Dừng ngay sau khi giải quyết xong câu hỏi, KHÔNG tự thêm lời khuyên y tế hay khuyên đi khám bác sĩ ở cuối.\n"
+        "6. DIỄN ĐẠT MƯỢT & GỌN: Dữ liệu dịch máy thường lủng củng và lặp từ — hãy viết lại thành tiếng Việt y khoa tự nhiên: dùng thuật ngữ chuẩn, bỏ từ/cụm bị lặp, lược các chữ thừa, và GỘP các mục trùng hoặc gần trùng nghĩa thành MỘT mục duy nhất. Đây chỉ là chuẩn hóa câu chữ cho dễ đọc — vẫn tuân thủ <core_principle>: không thêm thông tin mới, không đổi nghĩa.\n"
         "</rules>\n\n"
         "<examples>\n"
         "User: ho gà có triệu chứng gì?\n"
-        "Data: [{'Bệnh': 'Ho gà', 'Triệu chứng': ['ho co thắt', 'sốt nhẹ', 'Yan Peng Hui']}]\n"
-        "Assistant: Theo thông tin từ cơ sở dữ liệu y khoa, bệnh **Ho gà** thường biểu hiện qua các triệu chứng như ho co thắt và có thể kèm theo sốt nhẹ.\n\n"
-        "User: bệnh nào gây ho khan\n"
-        "Data: [{'Bệnh': 'Viêm phổi', 'Triệu chứng': ['ho khan', 'sốt cao']}, {'Bệnh': 'Lao phổi', 'Triệu chứng': ['ho khan kéo dài', 'sụt cân']}]\n"
-        "Assistant: Triệu chứng ho khan có thể liên quan đến một số bệnh lý trong hệ thống, điển hình như:\n- **Viêm phổi** (thường đi kèm sốt cao).\n- **Lao phổi** (triệu chứng ho khan thường kéo dài và gây sụt cân).\n\n"
-        "User: người bệnh cao huyết áp nên ăn gì và kiêng gì?\n"
-        "Data: [{'Bệnh': 'Cao huyết áp', 'Nên ăn': ['rau cần tây', 'cá', 'trái cây tươi'], 'Không nên ăn': ['muối', 'thịt mỡ', 'rượu bia']}]\n"
-        "Assistant: Chào bạn, đối với người mắc **Cao huyết áp**, chế độ ăn uống đóng vai trò rất quan trọng. Dựa trên dữ liệu, dưới đây là những lưu ý dành cho bạn:\n\n"
-        "• **Thực phẩm nên bổ sung:** Bạn nên tăng cường ăn rau cần tây, các loại cá và trái cây tươi để hỗ trợ kiểm soát huyết áp.\n"
-        "• **Thực phẩm cần hạn chế:** Đặc biệt cần tránh ăn mặn (giảm muối), kiêng thịt mỡ và tuyệt đối không sử dụng rượu bia.\n"
+        "Data: [{\"Bệnh\": \"Ho gà\", \"Triệu chứng\": [\"Crack kêu khi hít vào\", \"ho co thắt\", \"tức ngực\", \"phổi âm u\", \"co giật\", \"Yan Peng Hui\"]}]\n"
+        "Assistant: Bệnh **Ho gà** có các triệu chứng chính bao gồm:\n"
+        "- Tiếng rít (crack) khi hít vào\n"
+        "- Ho co thắt\n"
+        "- Tức ngực\n"
+        "- Âm phổi bất thường (phổi âm u)\n"
+        "- Co giật\n\n"
+        "User: triệu chứng suy thận?\n"
+        "Data: [{\"Bệnh\": \"Suy thận\", \"Triệu chứng\": [\"Buồn nôn và nôn\", "
+        "\"Phù thận và các đặc điểm trên khuôn mặt\", \"Nước tiểu sẫm màu\", \"Nitơ máu\", \"tăng nitơ máu trong cơ thể\"]}]\n"
+        "Assistant: Bệnh **Suy thận** thường biểu hiện qua các triệu chứng sau:\n"
+        "- Buồn nôn, nôn ói\n"
+        "- Phù mặt\n"
+        "- Nước tiểu sẫm màu\n"
+        "- Tăng nitơ máu\n\n"
+        "User: kiêng ăn cua biển có thể hỗ trợ điều trị bệnh gì?\n"
+        "Data: [{\"Bệnh\": \"Ho gà\", \"Không nên ăn\": [\"Cua\", \"cua biển\", \"tôm biển\", \"ốc biển\"]}, "
+        "{\"Bệnh\": \"Ngộ độc benzen\", \"Không nên ăn\": [\"cua\", \"tôm\", \"hải sâm (ngâm trong nước)\"]}]\n"
+        "Assistant: Việc kiêng cua biển có thể hỗ trợ quá trình điều trị các bệnh lý sau:\n"
+        "- **Ho gà** (bệnh nhân cũng nên kiêng cua nói chung, tôm biển và ốc biển)\n"
+        "- **Ngộ độc benzen** (bệnh nhân nên kết hợp kiêng thêm tôm và hải sâm ngâm nước)\n\n"
+        "User: thuốc chữa rối loạn lo âu?\n"
+        "Data: [{\"Bệnh\": \"Rối loạn lo âu\", \"Thuốc đề xuất\": "
+        "[\"Viên nén Paroxetine hydrochloride\", \"viên nén chlorpromazine hydrochloride\", \"viên nén carbamazepine\"]}]\n"
+        "Assistant: Đối với **Rối loạn lo âu**, các loại thuốc thường được đề xuất sử dụng bao gồm:\n"
+        "- **Viên nén Paroxetine hydrochloride**\n"
+        "- **Viên nén chlorpromazine hydrochloride**\n"
+        "- **Viên nén carbamazepine**\n\n"
+        "User: nguyên nhân gây ra bệnh tiểu đường?\n"
+        "Data: [{\"Bệnh\": \"Tiểu đường\", \"Nguyên nhân\": \"Có sự không đồng nhất di truyền rõ rệt trong bệnh tiểu đường loại I hoặc loại II. Bệnh tiểu đường có khuynh hướng gia đình, 1/4 đến 1/2 bệnh nhân có tiền sử gia đình. Có ít nhất 60 hội chứng di truyền liên quan đến bệnh tiểu đường trên lâm sàng.\"}]\n"
+        "Assistant: Nguyên nhân gây ra bệnh **Tiểu đường** chủ yếu liên quan đến yếu tố di truyền, cụ thể:\n"
+        "- Có sự không đồng nhất di truyền rõ rệt ở cả tiểu đường loại I và loại II.\n"
+        "- Có khuynh hướng di truyền trong gia đình.\n"
+        "- Dưới góc độ lâm sàng, đã phát hiện ít nhất 60 hội chứng di truyền có liên quan đến căn bệnh này.\n"
         "</examples>"
     )
 

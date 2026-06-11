@@ -23,22 +23,15 @@ Hybrid Architecture:
 
 Thuật toán xác định (query_type, entity):
 
-  BƯỚC 1 — regex fast path (classify_cypher_intent):
-    FORWARD patterns → (type, _clean_entity(group))
-      type ∈ {symptoms, medicine, treatment, advice,
-               prevention, department, profile}
-      entity = Vietnamese disease name
-    REVERSE patterns → (type, _clean_entity(group))
-      type ∈ {find_by_symptom, find_by_medicine,
-               find_by_nutrition_avoid, find_by_nutrition_eat,
-               find_by_prevention}
-      entity = constraint keyword (symptom phrase, drug name, food, etc.)
-    No match → (None, None)
+  BƯỚC 1 — LLM structured extraction (extract_intent_with_llm):
+    Primary classifier. Returns JSON {query_type, entity}.
+    Errors return (None, None).
 
-  BƯỚC 2 — LLM fallback (extract_intent_with_llm):
-    Called only when entity is None.
-    Returns JSON {query_type, entity}; errors return (None, None).
-    routing_method updated to "llm" whenever LLM is invoked.
+  BƯỚC 2 — Regex fallback (classify_cypher_intent):
+    Called only when LLM fails or returns no entity.
+    FORWARD patterns → (type, _clean_entity(group))
+    REVERSE patterns → (type, _clean_entity(group))
+    No match → (None, None)
 
   BƯỚC 3 — Pipeline routing (pipeline.py):
     type ∈ _FIND_BY_TYPES   → CYPHER (entity = keyword, CONTAINS, no disambiguation)
@@ -71,10 +64,13 @@ _VALID_QUERY_TYPES: frozenset[str] = frozenset({
     "symptoms", "medicine", "treatment", "advice",
     "prevention", "department", "profile",
     "linked_diseases",
+    "cause", "check_method", "susceptible_population",
     # Reverse (entity = constraint keyword, not a disease name)
     "find_by_symptom", "find_by_medicine",
     "find_by_nutrition_avoid", "find_by_nutrition_eat",
-    "find_by_prevention",
+    "find_by_prevention", "find_by_check_method",
+    # Chain (2-hop, entity = disease/symptom name)
+    "chain_linked_avoid", "chain_linked_eat",
     # Sentinel
     "unknown",
 })
@@ -82,7 +78,7 @@ _VALID_QUERY_TYPES: frozenset[str] = frozenset({
 _FIND_BY_TYPES: frozenset[str] = frozenset({
     "find_by_symptom", "find_by_medicine",
     "find_by_nutrition_avoid", "find_by_nutrition_eat",
-    "find_by_prevention",
+    "find_by_prevention", "find_by_check_method",
 })
 
 
@@ -202,6 +198,34 @@ def classify_cypher_intent(question: str) -> tuple[str | None, str | None]:
         if m:
             return "prevention", _clean_entity(m.group(1))
 
+    # Cause
+    for pattern in [
+        r"nguyên\s+nhân\s+(?:gây\s+)?(?:ra\s+)?(?:bệnh\s+)?(.+?)(?:\?|$)",
+        r"(?:bệnh\s+)?(.+?)\s+(?:do\s+)?nguyên\s+nhân\s+(?:gì|nào)",
+        r"(?:tại\s+sao|vì\s+sao)\s+(?:bị|mắc)\s+(?:bệnh\s+)?(.+?)(?:\?|$)",
+    ]:
+        m = re.search(pattern, q, re.IGNORECASE)
+        if m:
+            return "cause", _clean_entity(m.group(1))
+
+    # Check method
+    for pattern in [
+        r"(?:xét\s*nghiệm|kiểm\s*tra|chẩn\s*đoán)\s+(?:bệnh\s+)?(.+?)(?:\s+bằng\s+cách\s+nào|\?|$)",
+        r"(?:bệnh\s+)?(.+?)\s+(?:cần\s+)?(?:xét\s*nghiệm|kiểm\s*tra|chẩn\s*đoán)\s+(?:gì|nào|bằng\s+cách\s+nào)",
+    ]:
+        m = re.search(pattern, q, re.IGNORECASE)
+        if m:
+            return "check_method", _clean_entity(m.group(1))
+
+    # Susceptible population
+    for pattern in [
+        r"(?:ai|đối\s+tượng\s+nào|người\s+nào)\s+(?:dễ\s+)?(?:mắc|bị)\s+(?:bệnh\s+)?(.+?)(?:\?|$)",
+        r"(?:bệnh\s+)?(.+?)\s+(?:thường\s+gặp|phổ\s+biến)\s+(?:ở|với)\s+(?:ai|đối\s+tượng\s+nào)",
+    ]:
+        m = re.search(pattern, q, re.IGNORECASE)
+        if m:
+            return "susceptible_population", _clean_entity(m.group(1))
+
     # Reverse: find_by_medicine — "thuốc X chữa bệnh nào"
     for pattern in [
         r"thuốc\s+(.+?)\s+(?:chữa|điều\s*trị|dùng cho|trị)\s+bệnh\s+(?:gì|nào)",
@@ -242,6 +266,33 @@ def classify_cypher_intent(question: str) -> tuple[str | None, str | None]:
         if m:
             return "find_by_prevention", _clean_entity(m.group(1))
 
+    # Reverse: find_by_check_method
+    for pattern in [
+        r"(?:xét\s*nghiệm|kiểm\s*tra|chẩn\s*đoán)\s+(.+?)\s+dùng\s+để\s+(?:chẩn\s*đoán|phát\s+hiện)\s+bệnh\s+(?:gì|nào)",
+        r"(.+?)\s+là\s+xét\s*nghiệm\s+của\s+bệnh\s+(?:gì|nào)",
+    ]:
+        m = re.search(pattern, q, re.IGNORECASE)
+        if m:
+            return "find_by_check_method", _clean_entity(m.group(1))
+
+    # Chain: linked → avoid
+    for pattern in [
+        r"(?:thực\s*phẩm|đồ\s+ăn).*?(?:tránh|kiêng|không\s+nên\s+ăn).*?(?:bệnh.*?(?:liên\s+quan|đi\s+kèm|kèm\s+theo).*?)(?:\[)?(.+?)(?:\]|\?|$)",
+        r"(?:tránh|kiêng).*?(?:không\s+(?:mắc|gặp)).*?(?:bệnh.*?(?:liên\s+quan|đi\s+kèm)).*?(?:\[)?(.+?)(?:\]|\?|$)",
+    ]:
+        m = re.search(pattern, q, re.IGNORECASE)
+        if m:
+            return "chain_linked_avoid", _clean_entity(m.group(1))
+
+    # Chain: linked → eat
+    for pattern in [
+        r"(?:thực\s*phẩm|đồ\s+ăn).*?(?:nên\s+ăn|ăn\s+gì).*?(?:bệnh.*?(?:liên\s+quan|đi\s+kèm|kèm\s+theo).*?)(?:\[)?(.+?)(?:\]|\?|$)",
+        r"(?:để\s+phòng\s+tránh).*?(?:bệnh.*?(?:liên\s+quan|đi\s+kèm)).*?(?:nên\s+ăn|ăn\s+gì).*?(?:\[)?(.+?)(?:\]|\?|$)",
+    ]:
+        m = re.search(pattern, q, re.IGNORECASE)
+        if m:
+            return "chain_linked_eat", _clean_entity(m.group(1))
+
     # Linked diseases — "bệnh X liên quan đến bệnh nào"
     # Must appear BEFORE profile patterns to prevent broad profile regex
     # from swallowing "bệnh X liên quan đến..." queries.
@@ -281,170 +332,87 @@ def classify_cypher_intent(question: str) -> tuple[str | None, str | None]:
 # ── LLM Structured Intent Extraction (fallback) ───────────────────────────
 
 _INTENT_SYSTEM_PROMPT = """\
-You classify a Vietnamese (or English) medical question about the VietMedKG
-knowledge graph and return EXACTLY one JSON object: {"query_type": "...", "entity": "..."}.
-
-# Knowledge graph fields (VietMedKG)
-- Disease: disease_name, disease_description, disease_category, disease_cause
-- Symptom: disease_symptom (comma-separated blob: "Ho khan, Sốt cao, Đau ngực")
-- Treatment: cure_method, cure_department
-- Medicine: drug_common, drug_recommend (comma-separated blob, mostly
-  Vietnamese-prefixed Latin names e.g. "Viên nén Azithromycin, Viên nang Levofloxacin")
-- Advice: nutrition_do_eat, nutrition_not_eat, nutrition_recommend_meal,
-  disease_prevention (all comma-separated blobs; nutrition_not_eat samples:
-  "Rượu trắng, Bia, Trứng vịt muối, Dưa chua khô"; nutrition_do_eat samples:
-  "Trứng, vừng, bắp cải, rau muống, hạt sen")
-
-# Two query directions
-FORWARD  — user names a disease, asks about its fields. entity = disease name.
-REVERSE  — user names a constraint (symptom / drug / food / prevention method),
-           asks WHICH disease matches. entity = the constraint keyword.
+You classify a Vietnamese medical question about the VietMedKG knowledge graph.
+Return EXACTLY one JSON object: {"query_type": "...", "entity": "..."}.
 
 # Valid query_type values
 
-Forward (entity = Vietnamese disease name; null if irrelevant):
-  symptoms        — user wants Symptom of disease X
-  medicine        — user wants Medicine for disease X
-  treatment       — user wants Treatment / cure_method of disease X
-  advice          — user wants nutrition advice for disease X
-  prevention      — user wants how to prevent disease X
-  department      — user wants which medical department treats disease X
-  profile         — user wants overview / "what is" disease X
+Forward (entity = Vietnamese disease name):
+  symptoms                — Triệu chứng của bệnh X
+  cause                   — Nguyên nhân gây ra bệnh X
+  check_method            — Phương pháp xét nghiệm/chẩn đoán bệnh X
+  susceptible_population  — Đối tượng/Ai dễ mắc bệnh X
+  medicine                — Thuốc chữa bệnh X
+  treatment               — Phương pháp điều trị bệnh X
+  advice                  — Lời khuyên dinh dưỡng cho bệnh X
+  prevention              — Cách phòng ngừa bệnh X
+  department              — Khoa khám bệnh X
+  profile                 — Thông tin tổng quan về bệnh X
+  linked_diseases         — Bệnh đi kèm/liên quan với bệnh X
 
 Reverse (entity = constraint keyword, NOT a disease name):
-  find_by_symptom         — "which disease has symptom X" (Symptom.disease_symptom)
-  find_by_medicine        — "which disease is drug X for" (Medicine.drug_common/recommend)
-  find_by_nutrition_avoid — "which disease should avoid food X" (Advice.nutrition_not_eat)
-  find_by_nutrition_eat   — "which disease should eat food X" (Advice.nutrition_do_eat)
-  find_by_prevention      — "X helps prevent which disease" (Advice.disease_prevention)
+  find_by_symptom         — Bệnh nào có triệu chứng X
+  find_by_check_method    — Xét nghiệm X dùng chẩn đoán bệnh nào
+  find_by_medicine        — Thuốc X dùng chữa bệnh nào
+  find_by_nutrition_avoid — Ăn/Uống/Kiêng X để tránh/trị bệnh nào
+  find_by_nutrition_eat   — Ăn/Uống X tốt cho bệnh nào
+  find_by_prevention      — Phương pháp X phòng bệnh nào
+
+Chain (2-hop queries, entity = disease/symptom name):
+  chain_linked_avoid      — Tránh/kiêng thực phẩm nào để không mắc các bệnh liên quan đến bệnh X
+  chain_linked_eat        — Nên ăn thực phẩm nào để phòng tránh bệnh liên quan/đi kèm bệnh X
 
 Sentinel:
-  unknown — use when (a) question mixes multiple unrelated constraints (long
-            bracketed list of foods/drugs/symptoms), (b) general advice without
-            identifiable entity, or (c) intent doesn't match any type above.
-            Set entity = null. The pipeline routes to semantic search.
+  unknown — Câu hỏi liệt kê quá nhiều danh sách không liên quan, hoặc không thuộc các loại trên.
 
-# Rules
-- Forward: entity = Vietnamese disease name. Strip "bệnh ", "bị ".
-  Never include question words: gì, nào, như thế nào, what, which, how.
-- Reverse: entity = ONE short keyword (1–4 words). If user gives a list like
-  "[A, B, C, D]", pick the most specific ONE. If picking one would lose key
-  meaning → query_type="unknown", entity=null.
-- unknown: entity = null.
+# QUY TẮC TRÍCH XUẤT THỰC THỂ (Entity Extraction Rules)
+1. Bỏ các từ thừa: Bỏ các từ để hỏi (gì, nào, bao nhiêu), bỏ các từ đệm (bệnh, bị, mắc, chứng). Ví dụ: "bệnh tiểu đường" -> "tiểu đường".
+2. Giữ nguyên cụm từ: Entity phải ngắn gọn, súc tích (thường 1-4 từ).
+3. LUẬT CHO NGOẶC VUÔNG (Dành cho hệ thống test): LƯU Ý QUAN TRỌNG: Nếu trong câu hỏi có chứa dấu ngoặc vuông (ví dụ: [sốt cao, ho khan]), phần lớn thực thể cần tìm chính là nội dung NẰM TRONG ngoặc vuông. Hãy trích xuất nội dung đó và bỏ dấu ngoặc đi. Nếu trong ngoặc có nhiều items (ví dụ: [A, B, C]), hãy lấy mục đầu tiên hoặc tiêu biểu nhất để làm entity.
 
-# Output
-ONLY a JSON object, no markdown, no explanation:
+# OUTPUT FORMAT (Chỉ trả về JSON)
 {"query_type": "...", "entity": "..."}
 
-# Examples
+# VÍ DỤ (Examples)
 
 Q: "tiểu đường có triệu chứng gì"
 A: {"query_type": "symptoms", "entity": "tiểu đường"}
 
-Q: "bệnh nào có triệu chứng sốt cao"
-A: {"query_type": "find_by_symptom", "entity": "sốt cao"}
-
-Q: "bệnh nào gây ho khan kéo dài"
+Q: "bệnh nào có triệu chứng ho khan kéo dài"
 A: {"query_type": "find_by_symptom", "entity": "ho khan"}
 
-Q: "thuốc chữa viêm phổi"
-A: {"query_type": "medicine", "entity": "viêm phổi"}
+Q: "nguyên nhân nào gây ra viêm dạ dày"
+A: {"query_type": "cause", "entity": "viêm dạ dày"}
 
-Q: "bệnh tiểu đường điều trị bằng thuốc gì"
-A: {"query_type": "medicine", "entity": "tiểu đường"}
+Q: "cần làm xét nghiệm gì để biết bị sốt xuất huyết"
+A: {"query_type": "check_method", "entity": "sốt xuất huyết"}
+
+Q: "trẻ em có dễ mắc bệnh tay chân miệng không"
+A: {"query_type": "susceptible_population", "entity": "tay chân miệng"}
 
 Q: "viêm phổi dùng thuốc gì"
 A: {"query_type": "medicine", "entity": "viêm phổi"}
 
-Q: "cao huyết áp uống thuốc gì"
-A: {"query_type": "medicine", "entity": "cao huyết áp"}
-
 Q: "thuốc Azithromycin chữa bệnh nào"
 A: {"query_type": "find_by_medicine", "entity": "Azithromycin"}
-
-Q: "Levofloxacin dùng cho bệnh gì"
-A: {"query_type": "find_by_medicine", "entity": "Levofloxacin"}
-
-Q: "cách điều trị viêm khớp như thế nào"
-A: {"query_type": "treatment", "entity": "viêm khớp"}
-
-Q: "khoa nào điều trị viêm phổi"
-A: {"query_type": "department", "entity": "viêm phổi"}
-
-Q: "tăng huyết áp là bệnh gì"
-A: {"query_type": "profile", "entity": "tăng huyết áp"}
-
-Q: "tiểu đường nên ăn gì"
-A: {"query_type": "advice", "entity": "tiểu đường"}
-
-Q: "viêm dạ dày kiêng gì"
-A: {"query_type": "advice", "entity": "viêm dạ dày"}
-
-Q: "kiêng rượu bia tốt cho bệnh nào"
-A: {"query_type": "find_by_nutrition_avoid", "entity": "rượu bia"}
 
 Q: "không nên ăn dưa chua khô là bệnh gì"
 A: {"query_type": "find_by_nutrition_avoid", "entity": "dưa chua khô"}
 
-Q: "ăn rau muống tốt cho bệnh nào"
-A: {"query_type": "find_by_nutrition_eat", "entity": "rau muống"}
+Q: "thực phẩm nào nên tránh để không gặp phải các bệnh liên quan đến gout"
+A: {"query_type": "chain_linked_avoid", "entity": "gout"}
 
-Q: "hạt sen có tác dụng với bệnh nào"
-A: {"query_type": "find_by_nutrition_eat", "entity": "hạt sen"}
+Q: "ăn gì để phòng tránh các bệnh đi kèm với cao huyết áp"
+A: {"query_type": "chain_linked_eat", "entity": "cao huyết áp"}
 
-Q: "phòng tránh viêm phổi như thế nào"
-A: {"query_type": "prevention", "entity": "viêm phổi"}
+Q: "Việc tránh ăn [Bia, rượu trắng, cua] có thể hỗ trợ điều trị bệnh lý nào?"
+A: {"query_type": "find_by_nutrition_avoid", "entity": "Bia, rượu trắng, cua"}
 
-Q: "rửa tay phòng được bệnh nào"
-A: {"query_type": "find_by_prevention", "entity": "rửa tay"}
-
-Q: "tiêm vắc-xin BCG phòng bệnh gì"
-A: {"query_type": "find_by_prevention", "entity": "vắc-xin BCG"}
-
-Q: "bệnh tiểu đường liên quan đến những bệnh gì"
-A: {"query_type": "linked_diseases", "entity": "tiểu đường"}
-
-Q: "viêm phổi có liên quan đến bệnh nào"
-A: {"query_type": "linked_diseases", "entity": "viêm phổi"}
-
-Q: "bệnh nào đi kèm với tiểu đường"
-A: {"query_type": "linked_diseases", "entity": "tiểu đường"}
-
-Q: "có bao nhiêu bệnh có triệu chứng ho khan"
-A: {"query_type": "find_by_symptom", "entity": "ho khan"}
-
-Q: "bao nhiêu bệnh gây triệu chứng sốt cao"
-A: {"query_type": "find_by_symptom", "entity": "sốt cao"}
-
-Q: "có bao nhiêu triệu chứng của viêm phổi"
-A: {"query_type": "symptoms", "entity": "viêm phổi"}
-
-Q: "thống kê bệnh trong cơ sở dữ liệu"
-A: {"query_type": "unknown", "entity": null}
-
-Q: "Việc tránh ăn [Dưa chua khô, Bia, Rượu trắng, Trứng cút] có thể hỗ trợ điều trị bệnh lý nào?"
-A: {"query_type": "unknown", "entity": null}
-
-Q: "Tôi nên làm gì khi bị stress công việc"
-A: {"query_type": "unknown", "entity": null}
+Q: "Có thực phẩm nào tôi nên tránh để không gặp phải các bệnh liên quan đến [Tay và chân màu xanh] không?"
+A: {"query_type": "chain_linked_avoid", "entity": "Tay và chân màu xanh"}
 
 Q: "những bệnh nào thường gặp ở người cao tuổi"
-A: {"query_type": "unknown", "entity": null}
-
-Q: "bệnh nào phổ biến ở trẻ em"
-A: {"query_type": "unknown", "entity": null}
-
-Q: "người đái tháo đường cần chú ý gì"
-A: {"query_type": "unknown", "entity": null}
-
-Q: "bệnh mãn tính nào nguy hiểm nhất"
-A: {"query_type": "unknown", "entity": null}
-
-Q: "symptoms of diabetes"
-A: {"query_type": "symptoms", "entity": "tiểu đường"}
-
-Q: "which disease has fever as symptom"
-A: {"query_type": "find_by_symptom", "entity": "sốt"}\
+A: {"query_type": "unknown", "entity": null}\
 """
 
 
