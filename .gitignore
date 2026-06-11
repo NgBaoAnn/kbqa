@@ -23,3 +23,7 @@ lightrag_data/
 .agents/
 skills-lock.json
 .DS_Store
+
+# Logs & Scratch files
+*.log
+scratch_*.py
