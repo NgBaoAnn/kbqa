@@ -10,22 +10,30 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, utils
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.config import SUPABASE_JWT_SECRET
+from app.config import SUPABASE_JWT_SECRET, SUPABASE_URL
 
 _bearer_scheme = HTTPBearer(auto_error=False)
+_jwks_cache: dict[str, Any] | None = None
+_jwks_cache_expires_at = 0.0
 
 
 @dataclass(frozen=True)
 class CurrentUser:
-    """Authenticated Supabase user extracted from a verified access token."""
+    """Authenticated Supabase user mapped to an application profile."""
 
     id: str
     email: str | None
     role: str
     claims: dict[str, Any]
+    display_name: str | None = None
+    is_active: bool = True
 
 
 def _auth_error(detail: str) -> HTTPException:
@@ -49,13 +57,73 @@ def _decode_base64url_json(value: str) -> dict[str, Any]:
     return payload
 
 
-def verify_supabase_access_token(token: str) -> CurrentUser:
-    """Verify a Supabase JWT and return the current user.
+def _decode_base64url_bytes(value: str) -> bytes:
+    padded = value + "=" * (-len(value) % 4)
+    try:
+        return base64.urlsafe_b64decode(padded.encode("ascii"))
+    except ValueError as exc:
+        raise _auth_error("Malformed Supabase access token.") from exc
 
-    Supabase access tokens are signed with the project's JWT secret for the
-    default Auth setup. The frontend obtains the token through supabase-js and
-    sends it as `Authorization: Bearer <access_token>`.
-    """
+
+def _fetch_supabase_jwks() -> dict[str, Any]:
+    global _jwks_cache, _jwks_cache_expires_at
+
+    now = time.time()
+    if _jwks_cache is not None and now < _jwks_cache_expires_at:
+        return _jwks_cache
+
+    if not SUPABASE_URL:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "SUPABASE_AUTH_NOT_CONFIGURED",
+                "message": "Backend is missing SUPABASE_URL.",
+            },
+        )
+
+    try:
+        response = httpx.get(
+            f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json",
+            timeout=5.0,
+        )
+        response.raise_for_status()
+        jwks = response.json()
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "SUPABASE_JWKS_UNAVAILABLE",
+                "message": "Unable to fetch Supabase JWT signing keys.",
+            },
+        ) from exc
+
+    if not isinstance(jwks, dict) or not isinstance(jwks.get("keys"), list):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "SUPABASE_JWKS_INVALID",
+                "message": "Supabase JWT signing keys response is invalid.",
+            },
+        )
+
+    _jwks_cache = jwks
+    _jwks_cache_expires_at = now + 300
+    return jwks
+
+
+def _find_jwk(header: dict[str, Any]) -> dict[str, Any]:
+    kid = header.get("kid")
+    if not isinstance(kid, str) or not kid:
+        raise _auth_error("Supabase access token is missing key id.")
+
+    for key in _fetch_supabase_jwks()["keys"]:
+        if key.get("kid") == kid:
+            return key
+
+    raise _auth_error("Supabase access token signing key was not found.")
+
+
+def _verify_hs256_signature(parts: list[str]) -> None:
     if not SUPABASE_JWT_SECRET:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -64,14 +132,6 @@ def verify_supabase_access_token(token: str) -> CurrentUser:
                 "message": "Backend is missing SUPABASE_JWT_SECRET.",
             },
         )
-
-    parts = token.split(".")
-    if len(parts) != 3:
-        raise _auth_error("Malformed Supabase access token.")
-
-    header = _decode_base64url_json(parts[0])
-    if header.get("alg") != "HS256":
-        raise _auth_error("Unsupported Supabase access token algorithm.")
 
     signing_input = f"{parts[0]}.{parts[1]}".encode("ascii")
     expected_signature = hmac.new(
@@ -83,6 +143,56 @@ def verify_supabase_access_token(token: str) -> CurrentUser:
 
     if not hmac.compare_digest(expected_encoded, parts[2]):
         raise _auth_error("Invalid Supabase access token signature.")
+
+
+def _verify_es256_signature(parts: list[str], header: dict[str, Any]) -> None:
+    jwk = _find_jwk(header)
+    if jwk.get("kty") != "EC" or jwk.get("crv") != "P-256":
+        raise _auth_error("Unsupported Supabase access token signing key.")
+
+    signature = _decode_base64url_bytes(parts[2])
+    if len(signature) != 64:
+        raise _auth_error("Malformed Supabase access token signature.")
+
+    x_bytes = _decode_base64url_bytes(jwk["x"])
+    y_bytes = _decode_base64url_bytes(jwk["y"])
+    public_numbers = ec.EllipticCurvePublicNumbers(
+        int.from_bytes(x_bytes, "big"),
+        int.from_bytes(y_bytes, "big"),
+        ec.SECP256R1(),
+    )
+    public_key = public_numbers.public_key()
+    der_signature = utils.encode_dss_signature(
+        int.from_bytes(signature[:32], "big"),
+        int.from_bytes(signature[32:], "big"),
+    )
+    signing_input = f"{parts[0]}.{parts[1]}".encode("ascii")
+
+    try:
+        public_key.verify(der_signature, signing_input, ec.ECDSA(hashes.SHA256()))
+    except InvalidSignature as exc:
+        raise _auth_error("Invalid Supabase access token signature.") from exc
+
+
+def verify_supabase_access_token(token: str) -> CurrentUser:
+    """Verify a Supabase JWT and return the current user.
+
+    Supabase access tokens are signed with the project's JWT secret for the
+    default Auth setup. The frontend obtains the token through supabase-js and
+    sends it as `Authorization: Bearer <access_token>`.
+    """
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise _auth_error("Malformed Supabase access token.")
+
+    header = _decode_base64url_json(parts[0])
+    algorithm = header.get("alg")
+    if algorithm == "HS256":
+        _verify_hs256_signature(parts)
+    elif algorithm == "ES256":
+        _verify_es256_signature(parts, header)
+    else:
+        raise _auth_error("Unsupported Supabase access token algorithm.")
 
     claims = _decode_base64url_json(parts[1])
 
@@ -117,8 +227,34 @@ def verify_supabase_access_token(token: str) -> CurrentUser:
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> CurrentUser:
-    """Require a valid Supabase Bearer token."""
+    """Require a valid Supabase Bearer token and active app profile."""
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise _auth_error("Missing Bearer token.")
 
-    return verify_supabase_access_token(credentials.credentials)
+    token_user = verify_supabase_access_token(credentials.credentials)
+
+    from app.services import user_service
+
+    profile = await user_service.get_or_create_profile(token_user)
+    if not profile.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": "USER_INACTIVE",
+                "message": "User profile is inactive.",
+            },
+        )
+    return profile
+
+
+async def get_admin_user(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Require an active admin profile."""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": "ADMIN_REQUIRED",
+                "message": "Admin role is required.",
+            },
+        )
+    return current_user
