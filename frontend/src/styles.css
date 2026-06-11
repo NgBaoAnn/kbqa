@@ -1074,3 +1074,669 @@ p { margin: 0; }
 .safety-disclaimer {
   font-size: 0.76rem; color: #b0b0b0; margin-top: 8px;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   SPRINT 3 — Navigation, Knowledge Explorer, Admin Dashboard
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Sidebar nav section ─────────────────────────────────────── */
+.sidebar-nav {
+  padding: 0 6px 8px;
+  border-top: 1px solid var(--sidebar-border);
+  margin-top: 4px;
+}
+
+.nav-item {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; padding: 8px 10px;
+  border: none; border-radius: 8px;
+  background: transparent; color: var(--sidebar-text-muted);
+  font-size: 0.87rem; text-align: left; cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.nav-item:hover { background: var(--sidebar-hover); color: var(--sidebar-text); }
+.nav-item--active {
+  background: var(--sidebar-active);
+  color: var(--sidebar-text);
+  font-weight: 500;
+}
+.nav-item-icon { flex-shrink: 0; }
+
+/* ── Knowledge Explorer shell ────────────────────────────────── */
+.knowledge-shell {
+  flex: 1; display: flex;
+  overflow: hidden; min-width: 0;
+}
+
+.knowledge-list-pane {
+  width: 360px; min-width: 280px; flex-shrink: 0;
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--sidebar-border);
+  overflow: hidden;
+  background: var(--main-bg);
+}
+
+.knowledge-detail-pane {
+  flex: 1; display: flex; flex-direction: column;
+  overflow: hidden; min-width: 0;
+}
+
+.knowledge-detail-placeholder {
+  align-items: center; justify-content: center;
+  gap: 14px; color: var(--main-text-muted);
+  font-size: 0.9rem;
+}
+.knowledge-placeholder-icon {
+  color: var(--main-text-muted); opacity: 0.3;
+}
+
+/* ── Knowledge list header ───────────────────────────────────── */
+.knowledge-list-header {
+  padding: 24px 20px 12px;
+  border-bottom: 1px solid var(--sidebar-border);
+}
+.knowledge-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 1.05rem; font-weight: 700; color: var(--main-text);
+}
+.knowledge-subtitle {
+  font-size: 0.76rem; color: var(--main-text-muted);
+  margin-top: 4px;
+}
+
+/* ── Knowledge search bar ────────────────────────────────────── */
+.knowledge-search-bar {
+  position: relative;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--sidebar-border);
+}
+.knowledge-search-icon {
+  position: absolute; left: 22px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--main-text-muted); pointer-events: none;
+}
+.knowledge-search-input {
+  width: 100%; padding: 8px 32px 8px 34px;
+  border: 1px solid var(--composer-border); border-radius: 8px;
+  background: var(--composer-bg); color: var(--main-text);
+  font-size: 0.87rem; outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.knowledge-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(217,119,6,0.12);
+}
+.knowledge-search-input::placeholder { color: #b0b0b0; }
+.knowledge-search-clear {
+  position: absolute; right: 22px; top: 50%;
+  transform: translateY(-50%);
+  display: grid; place-items: center;
+  width: 20px; height: 20px;
+  border: none; background: transparent;
+  color: var(--main-text-muted); cursor: pointer;
+  border-radius: 4px;
+}
+.knowledge-search-clear:hover { color: var(--main-text); }
+
+/* ── Disease list ────────────────────────────────────────────── */
+.disease-list {
+  flex: 1; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--overlay-active) transparent;
+  padding: 6px;
+}
+
+.disease-item {
+  display: flex; flex-direction: column; gap: 3px;
+  width: 100%; padding: 10px 12px;
+  border: none; border-radius: 8px;
+  background: transparent; color: var(--main-text);
+  text-align: left; cursor: pointer;
+  transition: background 0.1s;
+}
+.disease-item:hover { background: var(--overlay-hover); }
+.disease-item--active {
+  background: var(--accent-light);
+  border: 1px solid rgba(217,119,6,0.2);
+}
+.dark .disease-item--active {
+  background: rgba(217,119,6,0.15);
+}
+.disease-item-name {
+  font-size: 0.88rem; font-weight: 600; color: var(--main-text);
+  line-height: 1.4;
+}
+.disease-item-category {
+  font-size: 0.71rem; color: var(--accent);
+  font-weight: 600; padding: 1px 6px;
+  background: rgba(217,119,6,0.1); border-radius: 4px;
+  align-self: flex-start;
+}
+.disease-item-summary {
+  font-size: 0.78rem; color: var(--main-text-muted);
+  line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+}
+
+/* ── Pagination ──────────────────────────────────────────────── */
+.knowledge-pagination {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--sidebar-border);
+}
+.pagination-btn {
+  display: grid; place-items: center;
+  width: 30px; height: 30px;
+  border: 1px solid var(--composer-border); border-radius: 7px;
+  background: transparent; color: var(--main-text-muted);
+  cursor: pointer; transition: background 0.1s, color 0.1s;
+}
+.pagination-btn:hover:not(:disabled) {
+  background: var(--overlay-hover); color: var(--main-text);
+}
+.pagination-btn:disabled { opacity: 0.4; cursor: default; }
+.pagination-label { font-size: 0.82rem; color: var(--main-text-muted); }
+
+/* ── Disease detail panel ────────────────────────────────────── */
+.disease-detail {
+  display: flex; flex-direction: column;
+  height: 100%; overflow: hidden;
+}
+
+.disease-detail-header {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--sidebar-border);
+  flex-shrink: 0;
+}
+.detail-back-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border: 1px solid var(--composer-border);
+  border-radius: 7px; background: transparent;
+  color: var(--main-text-muted); font-size: 0.82rem;
+  cursor: pointer; transition: background 0.12s, color 0.12s;
+}
+.detail-back-btn:hover { background: var(--overlay-hover); color: var(--main-text); }
+
+.disease-detail-body {
+  flex: 1; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--overlay-active) transparent;
+  padding: 24px 28px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+
+.disease-detail-title-row {
+  display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap;
+}
+.disease-detail-name {
+  font-size: 1.3rem; font-weight: 700; color: var(--main-text);
+  letter-spacing: -0.01em; line-height: 1.3;
+  flex: 1;
+}
+.disease-category-badge {
+  font-size: 0.75rem; font-weight: 600;
+  padding: 3px 9px; border-radius: 999px;
+  background: rgba(217,119,6,0.1); color: var(--accent);
+  flex-shrink: 0; align-self: flex-start; margin-top: 4px;
+}
+
+.disease-description {
+  font-size: 0.93rem; color: var(--main-text-2); line-height: 1.7;
+}
+
+.disease-cause-block {
+  font-size: 0.85rem; color: var(--main-text-muted);
+  padding: 8px 12px;
+  border: 1px solid var(--composer-border); border-radius: 8px;
+  background: var(--overlay-hover);
+}
+.disease-cause-label { font-weight: 600; color: var(--main-text-2); }
+
+/* ── Detail sections ─────────────────────────────────────────── */
+.detail-sections { display: flex; flex-direction: column; gap: 18px; }
+
+.detail-section { display: flex; flex-direction: column; gap: 8px; }
+
+.detail-section-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 0.88rem; font-weight: 700; color: var(--main-text);
+}
+.detail-section-emoji { font-size: 1.05em; }
+.detail-section-count {
+  font-size: 0.7rem; font-weight: 700; padding: 1px 6px;
+  border-radius: 999px; background: var(--overlay-active);
+  color: var(--main-text-muted); margin-left: auto;
+}
+
+.detail-chips-wrap {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+
+.detail-chip {
+  display: inline-block;
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 0.8rem; line-height: 1.4;
+}
+.chip--symptom  { background: #fef3c7; color: #92400e; }
+.chip--treatment{ background: #eff6ff; color: #1d4ed8; }
+.chip--medicine { background: #f0fdf4; color: #15803d; }
+.chip--advice   { background: #faf5ff; color: #7e22ce; }
+
+.dark .chip--symptom  { background: #45300a; color: #fde68a; }
+.dark .chip--treatment{ background: #1e3a5f; color: #93c5fd; }
+.dark .chip--medicine { background: #14532d; color: #86efac; }
+.dark .chip--advice   { background: #3b0764; color: #d8b4fe; }
+
+.disease-source-note {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.72rem; color: var(--main-text-muted);
+  padding-top: 8px; border-top: 1px solid var(--sidebar-border);
+}
+
+/* ── Knowledge state helpers ─────────────────────────────────── */
+.knowledge-state-center {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 10px; padding: 32px;
+  color: var(--main-text-muted); font-size: 0.9rem;
+}
+.knowledge-state-error { color: var(--danger-text); }
+
+.knowledge-empty {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; padding: 40px 24px;
+  color: var(--main-text-muted); font-size: 0.88rem; text-align: center;
+}
+.knowledge-empty-icon { opacity: 0.3; }
+
+/* ══════════════════════════════════════════════════════════════
+   ADMIN DASHBOARD
+   ══════════════════════════════════════════════════════════════ */
+
+/* Engine color tokens */
+:root {
+  --engine-lightrag: #7c3aed;
+  --engine-cypher:   #1d4ed8;
+  --engine-mock:     #6b7280;
+  --engine-other:    #d97706;
+}
+
+.admin-shell {
+  flex: 1; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--overlay-active) transparent;
+  background: var(--main-bg);
+}
+
+.admin-content {
+  width: min(900px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 32px 0 48px;
+  display: flex; flex-direction: column; gap: 32px;
+}
+
+.admin-page-header { display: flex; flex-direction: column; gap: 4px; }
+.admin-page-title {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 1.3rem; font-weight: 700; color: var(--main-text);
+}
+.admin-page-sub { font-size: 0.87rem; color: var(--main-text-muted); }
+
+/* ── Admin section ───────────────────────────────────────────── */
+.admin-section {
+  display: flex; flex-direction: column; gap: 16px;
+  border: 1px solid var(--sidebar-border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  background: var(--main-bg);
+}
+
+.admin-section-header {
+  display: flex; align-items: center;
+  justify-content: space-between; gap: 12px;
+  flex-wrap: wrap;
+}
+.admin-section-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 1rem; font-weight: 700; color: var(--main-text);
+}
+.admin-header-actions {
+  display: flex; align-items: center; gap: 10px;
+}
+.admin-refresh-time { font-size: 0.75rem; color: var(--main-text-muted); }
+.admin-refresh-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 11px; border: 1px solid var(--composer-border);
+  border-radius: 7px; background: transparent;
+  color: var(--main-text-muted); font-size: 0.8rem;
+  cursor: pointer; transition: background 0.12s, color 0.12s;
+}
+.admin-refresh-btn:hover:not(:disabled) {
+  background: var(--overlay-hover); color: var(--main-text);
+}
+.admin-refresh-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Metric cards ────────────────────────────────────────────── */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px; border-radius: 10px;
+  border: 1px solid transparent;
+}
+.metric-card-icon {
+  width: 36px; height: 36px; border-radius: 9px;
+  display: grid; place-items: center; flex-shrink: 0;
+}
+.metric-card-body { display: flex; flex-direction: column; gap: 2px; }
+.metric-value { font-size: 1.4rem; font-weight: 700; line-height: 1.2; }
+.metric-label { font-size: 0.75rem; color: var(--main-text-muted); font-weight: 500; }
+.metric-sub { font-size: 0.71rem; color: var(--main-text-muted); margin-top: 1px; }
+
+.metric--blue  { background: #eff6ff; border-color: #dbeafe; }
+.metric--blue  .metric-card-icon { background: #dbeafe; color: #1d4ed8; }
+.metric--blue  .metric-value { color: #1d4ed8; }
+.metric--amber { background: #fffbeb; border-color: #fef3c7; }
+.metric--amber .metric-card-icon { background: #fef3c7; color: #d97706; }
+.metric--amber .metric-value { color: #d97706; }
+.metric--green { background: #f0fdf4; border-color: #dcfce7; }
+.metric--green .metric-card-icon { background: #dcfce7; color: #15803d; }
+.metric--green .metric-value { color: #15803d; }
+.metric--red   { background: #fef2f2; border-color: #fecaca; }
+.metric--red   .metric-card-icon { background: #fecaca; color: #dc2626; }
+.metric--red   .metric-value { color: #dc2626; }
+
+/* Dark mode metric cards */
+.dark .metric--blue  { background: #1e3a5f; border-color: #1e40af; }
+.dark .metric--blue  .metric-card-icon { background: #1e40af; color: #93c5fd; }
+.dark .metric--blue  .metric-value { color: #93c5fd; }
+.dark .metric--amber { background: #45300a; border-color: #78350f; }
+.dark .metric--amber .metric-card-icon { background: #78350f; color: #fde68a; }
+.dark .metric--amber .metric-value { color: #fde68a; }
+.dark .metric--green { background: #14532d; border-color: #166534; }
+.dark .metric--green .metric-card-icon { background: #166534; color: #86efac; }
+.dark .metric--green .metric-value { color: #86efac; }
+.dark .metric--red   { background: #450a0a; border-color: #7f1d1d; }
+.dark .metric--red   .metric-card-icon { background: #7f1d1d; color: #fecaca; }
+.dark .metric--red   .metric-value { color: #fecaca; }
+
+/* ── Engine usage chart ──────────────────────────────────────── */
+.engine-chart {
+  border: 1px solid var(--sidebar-border); border-radius: 10px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.engine-chart-title {
+  font-size: 0.82rem; font-weight: 700; color: var(--main-text);
+}
+.engine-bars { display: flex; flex-direction: column; gap: 7px; }
+.engine-bar-row {
+  display: grid; grid-template-columns: 120px 1fr 40px;
+  align-items: center; gap: 10px;
+}
+.engine-bar-label {
+  font-size: 0.78rem; color: var(--main-text-2);
+  font-family: 'Fira Code', 'Fira Mono', monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.engine-bar-track {
+  height: 10px; background: var(--overlay-active);
+  border-radius: 999px; overflow: hidden;
+}
+.engine-bar-fill {
+  height: 100%; border-radius: 999px;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.engine-bar-count {
+  font-size: 0.75rem; color: var(--main-text-muted);
+  text-align: right; font-weight: 600;
+}
+.engine-chart-total {
+  font-size: 0.72rem; color: var(--main-text-muted);
+  text-align: right;
+}
+
+/* ── Admin state helpers ─────────────────────────────────────── */
+.admin-state-center {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 10px; padding: 32px;
+  color: var(--main-text-muted); font-size: 0.9rem;
+}
+.admin-state-error { color: var(--danger-text); }
+
+/* ── Review Queue ────────────────────────────────────────────── */
+.review-count-badge {
+  display: inline-flex; align-items: center;
+  min-width: 22px; height: 18px; padding: 0 6px;
+  background: #dc2626; color: #fff;
+  border-radius: 999px; font-size: 0.7rem; font-weight: 700;
+  margin-left: 4px;
+}
+
+.review-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--sidebar-border);
+  border-radius: 10px;
+}
+.review-table {
+  width: 100%; border-collapse: collapse; font-size: 0.85rem;
+}
+.review-th {
+  text-align: left; font-weight: 700;
+  padding: 10px 14px;
+  background: #f9fafb; color: var(--main-text-muted);
+  border-bottom: 1.5px solid var(--sidebar-border);
+  font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.dark .review-th { background: #1e1e1e; }
+
+.review-row { transition: background 0.1s; }
+.review-row:hover { background: var(--overlay-hover); }
+
+.review-cell {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--sidebar-border);
+  vertical-align: middle;
+  color: var(--main-text-2);
+}
+.review-cell--mono {
+  font-family: 'Fira Code', 'Fira Mono', monospace;
+  font-size: 0.8rem;
+}
+.review-cell--date {
+  font-size: 0.78rem; white-space: nowrap;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.review-time { color: var(--main-text-muted); }
+
+.review-msg-id {
+  padding: 2px 6px; background: var(--overlay-active);
+  border-radius: 4px; font-size: 0.78rem;
+}
+
+.review-category-badge {
+  display: inline-block; padding: 2px 8px;
+  border-radius: 999px; font-size: 0.73rem; font-weight: 600;
+}
+.review-cat--answer_quality { background: #eff6ff; color: #1d4ed8; }
+.review-cat--safety         { background: #fef2f2; color: #dc2626; }
+.review-cat--other          { background: #f9fafb; color: #6b7280; }
+.dark .review-cat--answer_quality { background: #1e3a5f; color: #93c5fd; }
+.dark .review-cat--safety         { background: #450a0a; color: #fecaca; }
+.dark .review-cat--other          { background: #1f2937; color: #9ca3af; }
+
+.review-rating-badge {
+  display: inline-block; font-size: 0.78rem;
+}
+.review-rating--down { color: #dc2626; }
+.review-rating--up   { color: #15803d; }
+
+.review-empty {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 10px; padding: 40px 24px;
+  color: var(--main-text-muted); font-size: 0.88rem; text-align: center;
+}
+.review-empty-icon { opacity: 0.3; }
+
+/* Review row: clickable */
+.review-row--clickable {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.review-row--clickable:hover { background: var(--s3-surface-2); }
+.review-row--clickable:focus-visible { outline: 2px solid var(--s3-accent); outline-offset: -2px; }
+
+.review-cell--preview {
+  max-width: 260px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--s3-text-secondary); font-size: 0.85rem;
+}
+.review-na { color: var(--s3-text-tertiary); }
+
+/* ── Review Detail Overlay ───────────────────────────────────────────────── */
+.review-detail-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  animation: review-overlay-in 0.18s ease;
+}
+@keyframes review-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.review-detail-panel {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+  width: 100%; max-width: 680px;
+  max-height: 85vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 0;
+  animation: review-panel-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes review-panel-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+.review-detail-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--s3-border);
+  gap: 12px;
+}
+.review-detail-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.review-detail-close {
+  background: var(--s3-surface-2);
+  border: 1px solid var(--s3-border);
+  border-radius: 8px;
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--s3-text-secondary);
+  cursor: pointer; font-size: 1rem;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.review-detail-close:hover { background: var(--s3-surface-3); color: var(--s3-text-primary); }
+
+.review-detail-meta {
+  display: flex; flex-wrap: wrap; gap: 6px 20px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--s3-border);
+  font-size: 0.83rem; color: var(--s3-text-secondary);
+}
+.review-detail-meta-item strong { color: var(--s3-text-primary); font-weight: 600; margin-right: 4px; }
+.review-detail-id {
+  background: var(--s3-surface-2);
+  padding: 1px 6px; border-radius: 4px;
+  font-family: monospace; font-size: 0.82rem;
+}
+
+.review-detail-comment {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--s3-border);
+}
+.review-detail-section-label {
+  font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--s3-text-tertiary);
+  margin-bottom: 8px;
+}
+.review-detail-quote {
+  margin: 0; padding: 10px 14px;
+  border-radius: 8px; font-size: 0.9rem; line-height: 1.55;
+}
+.review-detail-quote--comment {
+  background: var(--s3-surface-2);
+  border-left: 3px solid var(--s3-border);
+  color: var(--s3-text-secondary);
+  font-style: italic;
+}
+
+.review-detail-qa {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 16px 24px 24px;
+}
+.review-detail-bubble {
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.review-detail-bubble--user {
+  background: var(--s3-surface-2);
+  border: 1px solid var(--s3-border);
+}
+.review-detail-bubble--assistant {
+  background: color-mix(in srgb, var(--s3-accent) 6%, var(--s3-surface-1));
+  border: 1px solid color-mix(in srgb, var(--s3-accent) 25%, var(--s3-border));
+}
+.review-detail-content {
+  margin: 0; font-size: 0.9rem; line-height: 1.65;
+  color: var(--s3-text-primary); white-space: pre-wrap;
+  max-height: 240px; overflow-y: auto;
+}
+.review-detail-na { color: var(--s3-text-tertiary); font-style: italic; }
+
+/* ══════════════════════════════════════════════════════════════
+   SPRINT 3 — Responsive
+   ══════════════════════════════════════════════════════════════ */
+@media (max-width: 767px) {
+  /* Knowledge: hide list pane when detail is showing */
+  .knowledge-list-pane--hidden-mobile { display: none; }
+
+  /* Full-width detail on mobile */
+  .knowledge-detail-pane { min-width: 100%; }
+
+  /* Hide placeholder on mobile (only list or detail, never both) */
+  .knowledge-detail-placeholder { display: none; }
+
+  /* Disease detail body: less padding */
+  .disease-detail-body { padding: 16px 20px; }
+
+  /* Admin: single column cards */
+  .metrics-grid { grid-template-columns: 1fr 1fr; }
+
+  /* Engine bar label shorter */
+  .engine-bar-row { grid-template-columns: 90px 1fr 32px; }
+
+  /* Admin content padding */
+  .admin-content { width: calc(100% - 32px); padding: 20px 0 40px; }
+
+  /* Review table: horizontal scroll on mobile */
+  .review-table-wrap { font-size: 0.8rem; }
+}
+
+@media (max-width: 479px) {
+  .metrics-grid { grid-template-columns: 1fr; }
+  .knowledge-list-pane { width: 100%; min-width: unset; }
+}
