@@ -8,7 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class CurrentUserResponse(BaseModel):
     id: str
     email: str | None = None
-    role: str = "authenticated"
+    role: Literal["user", "admin"] = "user"
+    display_name: str | None = None
+    is_active: bool = True
     auth_provider: Literal["supabase"] = "supabase"
 
     model_config = ConfigDict(
@@ -16,7 +18,9 @@ class CurrentUserResponse(BaseModel):
             "example": {
                 "id": "0b3fb8c2-88b4-41b9-8a70-5bd0fb0dd6a1",
                 "email": "student@example.com",
-                "role": "authenticated",
+                "role": "user",
+                "display_name": "student",
+                "is_active": True,
                 "auth_provider": "supabase",
             }
         }
@@ -295,4 +299,3 @@ class AdminMetricsResponse(BaseModel):
             }
         }
     )
-
