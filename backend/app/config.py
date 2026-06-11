@@ -4,10 +4,12 @@ Reuses Neo4j credentials from ai_engine.config to ensure single source of truth.
 """
 
 import os
+from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
 load_dotenv(find_dotenv(usecwd=True))
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
 # ── API Configuration ─────────────────────────────────────────────────────
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
@@ -23,6 +25,13 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 NEO4J_URI = os.getenv("NEO4J_URI", "neo4j+s://localhost:7687")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
+
+# ── Supabase ──────────────────────────────────────────────────────────────
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL", "")
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
