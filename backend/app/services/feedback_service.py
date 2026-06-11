@@ -108,6 +108,11 @@ def _insert_feedback(
             comment
         )
         values (%s, %s, %s, %s, %s)
+        on conflict (message_id, user_id) do update set
+            rating = excluded.rating,
+            reason = excluded.reason,
+            comment = excluded.comment,
+            created_at = timezone('utc', now())
         returning
             id::text as id,
             message_id::text as message_id,
