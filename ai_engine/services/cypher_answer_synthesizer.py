@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 # ── Payload budget constants ────────────────────────────────────────────────
 
-_MAX_RECORDS = 5
+_MAX_RECORDS = 3
 _MAX_FIELD_CHARS = 300
 _MAX_PAYLOAD_CHARS = 3000
 
@@ -65,7 +65,11 @@ _BLOB_FIELDS: frozenset[str] = frozenset({
     "Khoa điều trị",
 })
 
-_MAX_LIST_ITEMS = 15
+_LOW_PRIORITY_FIELDS: frozenset[str] = frozenset({
+    "Chi tiết thuốc", "Thực đơn gợi ý", "Nên ăn", "Không nên ăn", "Phòng ngừa"
+})
+
+_MAX_LIST_ITEMS = 5
 
 # disease_category in VietMedKG is a breadcrumb path from the Chinese source.
 # Strip the encyclopedia prefix so the LLM sees only the meaningful specialty segments.
@@ -119,19 +123,20 @@ def _prepare_records_for_llm(records: list[dict]) -> tuple[str, str]:
         if item:
             localized.append(item)
 
-    total = sum(len(str(r)) for r in localized)
-    if total > _MAX_PAYLOAD_CHARS and localized:
-        ratio = _MAX_PAYLOAD_CHARS / total
+    # Semantic Triage: Drop low priority fields if payload is too large
+    while len(json.dumps(localized, ensure_ascii=False)) > _MAX_PAYLOAD_CHARS:
+        dropped_any = False
         for r in localized:
-            for label in list(r.keys()):
-                v = r[label]
-                if isinstance(v, list):
-                    cap = max(3, int(len(v) * ratio))
-                    r[label] = v[:cap]
-                elif isinstance(v, str):
-                    cap = max(50, int(len(v) * ratio))
-                    if len(v) > cap:
-                        r[label] = v[:cap] + "..."
+            for field in list(r.keys()):
+                if field in _LOW_PRIORITY_FIELDS:
+                    del r[field]
+                    dropped_any = True
+        
+        # If no low priority fields left to drop and still too large, drop the last record
+        if not dropped_any and len(localized) > 1:
+            localized.pop()
+        elif not dropped_any:
+            break  # Can't reduce further, keep at least 1 core record
 
     return json.dumps(localized, ensure_ascii=False, indent=2), note
 
@@ -186,25 +191,34 @@ async def synthesize_answer(question: str, records: list[dict]) -> str:
     data_text, note = _prepare_records_for_llm(records)
 
     system_prompt = (
-        "Bạn là trợ lý y khoa AegisHealth. Nhiệm vụ: Dựa vào dữ liệu JSON, hãy viết câu trả lời tiếng Việt thật tự nhiên, mạch lạc và dễ hiểu cho người dùng.\n\n"
+        "Bạn là trợ lý y khoa AegisHealth. Nhiệm vụ: Đọc hiểu câu hỏi, chọn lọc dữ liệu phù hợp "
+        "và trình bày thành câu trả lời tiếng Việt mạch lạc.\n\n"
         "<rules>\n"
-        "1. Trả lời bằng giọng văn thân thiện, trôi chảy, kết nối các ý mềm mại thay vì chỉ liệt kê khô khan.\n"
-        "2. TUYỆT ĐỐI CHỈ dùng thông tin có trong dữ liệu JSON. Không tự sáng tác hay thêm bệnh, thuốc ở ngoài.\n"
-        "3. Lọc bỏ các từ phiên âm vô nghĩa (ví dụ: 'Úc Trác', 'Yan Peng Hui') khỏi câu trả lời.\n"
-        "4. Tên bệnh và tên thuốc cần được in đậm (**) để nổi bật.\n"
+        "1. LỌC DỮ LIỆU: Chỉ giữ lại các bản ghi khớp với câu hỏi. Nếu câu hỏi tìm bệnh dựa trên triệu chứng/chế độ ăn, hãy liệt kê các bệnh có chứa yếu tố đó trong dữ liệu.\n"
+        "2. KHÔNG SUY DIỄN: CHỈ dùng thông tin có trong dữ liệu. TUYỆT ĐỐI KHÔNG tự giải thích cơ chế, phương pháp chẩn đoán, hay tự đưa ra nhận xét chung.\n"
+        "3. ĐỊNH DẠNG NGHIÊM NGẶT: Phải in đậm (**) tên bệnh và tên thuốc. Mọi danh sách (triệu chứng, thuốc, thực phẩm) PHẢI được gạch đầu dòng (-) từng mục một. Tuyệt đối không gộp nhiều mục vào chung một câu văn xuôi.\n"
+        "4. Bỏ qua các từ phiên âm vô nghĩa như 'Úc Trác', 'Yan Peng Hui'.\n"
+        "5. Dừng trả lời ngay sau mục cuối cùng, KHÔNG thêm lời khuyên y tế ở cuối.\n"
         "</rules>\n\n"
         "<examples>\n"
         "User: ho gà có triệu chứng gì?\n"
-        "Data: [{'Bệnh': 'Ho gà', 'Triệu chứng': ['ho co thắt', 'sốt nhẹ', 'Yan Peng Hui']}]\n"
-        "Assistant: Theo thông tin từ cơ sở dữ liệu y khoa, bệnh **Ho gà** thường biểu hiện qua các triệu chứng như ho co thắt và có thể kèm theo sốt nhẹ.\n\n"
-        "User: bệnh nào gây ho khan\n"
-        "Data: [{'Bệnh': 'Viêm phổi', 'Triệu chứng': ['ho khan', 'sốt cao']}, {'Bệnh': 'Lao phổi', 'Triệu chứng': ['ho khan kéo dài', 'sụt cân']}]\n"
-        "Assistant: Triệu chứng ho khan có thể liên quan đến một số bệnh lý trong hệ thống, điển hình như:\n- **Viêm phổi** (thường đi kèm sốt cao).\n- **Lao phổi** (triệu chứng ho khan thường kéo dài và gây sụt cân).\n\n"
-        "User: người bệnh cao huyết áp nên ăn gì và kiêng gì?\n"
-        "Data: [{'Bệnh': 'Cao huyết áp', 'Nên ăn': ['rau cần tây', 'cá', 'trái cây tươi'], 'Không nên ăn': ['muối', 'thịt mỡ', 'rượu bia']}]\n"
-        "Assistant: Chào bạn, đối với người mắc **Cao huyết áp**, chế độ ăn uống đóng vai trò rất quan trọng. Dựa trên dữ liệu, dưới đây là những lưu ý dành cho bạn:\n\n"
-        "• **Thực phẩm nên bổ sung:** Bạn nên tăng cường ăn rau cần tây, các loại cá và trái cây tươi để hỗ trợ kiểm soát huyết áp.\n"
-        "• **Thực phẩm cần hạn chế:** Đặc biệt cần tránh ăn mặn (giảm muối), kiêng thịt mỡ và tuyệt đối không sử dụng rượu bia.\n"
+        "Data: [{\"Bệnh\": \"Ho gà\", \"Triệu chứng\": [\"ho co thắt\", \"sốt nhẹ\", \"Yan Peng Hui\"]}, "
+        "{\"Bệnh\": \"Ho khan mạn tính\", \"Triệu chứng\": [\"ho kéo dài\"]}]\n"
+        "Assistant: Bệnh **Ho gà** có các triệu chứng:\n"
+        "- Ho co thắt\n"
+        "- Sốt nhẹ\n\n"
+        "User: tránh ăn [bia, rượu trắng] có thể hỗ trợ điều trị bệnh gì?\n"
+        "Data: [{\"Bệnh\": \"Bệnh cơ tim\", \"Không nên ăn\": [\"bia\", \"rượu trắng\", \"chân gà\"]}, "
+        "{\"Bệnh\": \"Viêm phổi\", \"Nên ăn\": [\"trái cây\"]}]\n"
+        "Assistant: Việc tránh ăn bia, rượu trắng có thể hỗ trợ điều trị các bệnh sau:\n"
+        "- **Bệnh cơ tim** (cũng nên kiêng chân gà)\n\n"
+        "User: thuốc chữa rối loạn lo âu ở trẻ em?\n"
+        "Data: [{\"Bệnh\": \"Rối loạn lo âu ở trẻ em\", \"Thuốc đề xuất\": "
+        "[\"Paroxetine hydrochloride\", \"Butyrone hydrochloride\", \"Carbamazepine\"]}]\n"
+        "Assistant: Đối với **Rối loạn lo âu ở trẻ em**, các thuốc được đề xuất gồm:\n"
+        "- **Paroxetine hydrochloride**\n"
+        "- **Butyrone hydrochloride**\n"
+        "- **Carbamazepine**\n"
         "</examples>"
     )
 

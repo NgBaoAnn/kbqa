@@ -33,7 +33,16 @@ async def llm_model_func(
         messages.append({"role": "system", "content": system_prompt})
     if history_messages:
         messages.extend(history_messages)
-    messages.append({"role": "user", "content": prompt})
+        
+    # [Qwen 3B Fix] The context in system_prompt can be massive (>4000 tokens).
+    # To prevent the model from forgetting the language constraint and drifting 
+    # into Indonesian/Malay, we must forcefully inject the constraint at the 
+    # VERY END of the user prompt.
+    safe_user_prompt = prompt.strip()
+    if not keyword_extraction:
+        safe_user_prompt += "\n\n(Yêu cầu bắt buộc: TRẢ LỜI BẰNG TIẾNG VIỆT)"
+        
+    messages.append({"role": "user", "content": safe_user_prompt})
 
     # LightRAG passes max_new_tokens via kwargs to cap output length.
     # Respect it when provided; otherwise use small defaults for 3B models:
