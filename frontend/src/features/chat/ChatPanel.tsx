@@ -161,7 +161,7 @@ function AssistantMsg({ response, time, onComposerFill }: AssistantMsgProps) {
           </div>
 
           {/* Feedback controls */}
-          <FeedbackControls messageId={response.message_id} />
+          <FeedbackControls messageId={response.message_id} initialFeedback={response.feedback} />
         </div>
       </div>
     </div>
@@ -207,6 +207,7 @@ function RecordMsg({ record, sources, onComposerFill }: RecordMsgProps) {
         source_count: (record.metadata?.source_count as number) ?? 0,
         cypher: null,
       },
+      feedback: record.feedback ?? null,
     };
     return (
       <AssistantMsg

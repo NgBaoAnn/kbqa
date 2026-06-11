@@ -31,12 +31,13 @@ type FeedbackState = "idle" | "pending-down" | "submitting" | "submitted" | "err
 
 interface FeedbackControlsProps {
   messageId: string;
+  initialFeedback?: { rating: "up" | "down"; reason?: string | null } | null;
 }
 
-export function FeedbackControls({ messageId }: FeedbackControlsProps) {
-  const [state, setState] = useState<FeedbackState>("idle");
-  const [rating, setRating] = useState<FeedbackRating | null>(null);
-  const [reason, setReason] = useState<FeedbackReason | null>(null);
+export function FeedbackControls({ messageId, initialFeedback }: FeedbackControlsProps) {
+  const [state, setState] = useState<FeedbackState>(initialFeedback ? "submitted" : "idle");
+  const [rating, setRating] = useState<FeedbackRating | null>(initialFeedback?.rating ?? null);
+  const [reason, setReason] = useState<FeedbackReason | null>((initialFeedback?.reason as FeedbackReason) ?? null);
   const [comment, setComment] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showComment, setShowComment] = useState(false);
@@ -88,6 +89,14 @@ export function FeedbackControls({ messageId }: FeedbackControlsProps) {
             ? "Cảm ơn phản hồi của bạn!"
             : "Đã ghi nhận — nhóm sẽ xem xét câu trả lời này."}
         </span>
+        <button
+          type="button"
+          className="link-btn"
+          style={{ marginLeft: "8px", fontSize: "12px", color: "var(--s3-text-tertiary)" }}
+          onClick={() => setState("idle")}
+        >
+          (Sửa đổi)
+        </button>
       </div>
     );
   }
