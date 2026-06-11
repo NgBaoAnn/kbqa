@@ -142,23 +142,36 @@ async def get_review_queue(*, limit: int, offset: int) -> ReviewQueueResponse:
         count_row = db.fetch_one("SELECT COUNT(*) AS total FROM public.review_items")
         total: int = int(count_row["total"]) if count_row else 0
 
-        # Full join: review_items → feedback → messages
+        # Full join: review_items → feedback → assistant message → preceding user message
         rows: list[dict[str, Any]] = db.fetch_all(
             """
             SELECT
-                ri.id           AS review_item_id,
-                ri.status       AS status,
-                ri.category     AS category,
-                ri.created_at   AS created_at,
-                f.id            AS feedback_id,
-                f.message_id    AS message_id,
-                f.rating        AS rating,
-                f.reason        AS reason,
-                f.comment       AS comment,
-                m.conversation_id AS conversation_id
+                ri.id               AS review_item_id,
+                ri.status           AS status,
+                ri.category         AS category,
+                ri.created_at       AS created_at,
+                f.id                AS feedback_id,
+                f.message_id        AS message_id,
+                f.rating            AS rating,
+                f.reason            AS reason,
+                f.comment           AS comment,
+                m.conversation_id   AS conversation_id,
+                m.content           AS answer_content,
+                prev_m.content      AS question_content
             FROM public.review_items ri
-            JOIN public.feedback     f  ON f.id  = ri.feedback_id
-            JOIN public.messages     m  ON m.id  = f.message_id
+            JOIN public.feedback     f      ON f.id  = ri.feedback_id
+            JOIN public.messages     m      ON m.id  = f.message_id
+            LEFT JOIN public.messages prev_m ON (
+                prev_m.conversation_id = m.conversation_id
+                AND prev_m.role = 'user'
+                AND prev_m.created_at = (
+                    SELECT MAX(u.created_at)
+                    FROM public.messages u
+                    WHERE u.conversation_id = m.conversation_id
+                      AND u.role = 'user'
+                      AND u.created_at < m.created_at
+                )
+            )
             ORDER BY ri.created_at DESC
             LIMIT %s OFFSET %s
             """,
@@ -182,6 +195,8 @@ async def get_review_queue(*, limit: int, offset: int) -> ReviewQueueResponse:
             reason=row.get("reason"),
             comment=row.get("comment"),
             created_at=str(row["created_at"]),
+            question_content=row.get("question_content"),
+            answer_content=row.get("answer_content"),
         )
         for row in rows
     ]

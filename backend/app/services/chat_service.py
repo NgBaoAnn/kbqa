@@ -71,7 +71,12 @@ def _conversation_summary(row: dict[str, Any]) -> ConversationSummary:
 
 
 def _message_record(row: dict[str, Any]) -> MessageRecord:
-    return MessageRecord(**row)
+    r = dict(row)
+    rating = r.pop("feedback_rating", None)
+    reason = r.pop("feedback_reason", None)
+    if rating:
+        r["feedback"] = {"rating": rating, "reason": reason}
+    return MessageRecord(**r)
 
 
 def _persist_message_sources(
@@ -224,13 +229,24 @@ async def get_conversation(
         raise _not_found()
 
     messages = db.fetch_all(
-        f"""
-        select {MESSAGE_COLUMNS}
-        from public.messages
-        where conversation_id = %s
-        order by created_at asc
+        """
+        select 
+            m.id::text as id,
+            m.role,
+            m.content,
+            m.response_type,
+            m.data,
+            m.safety,
+            m.metadata,
+            m.created_at::text as created_at,
+            f.rating as feedback_rating,
+            f.reason as feedback_reason
+        from public.messages m
+        left join public.feedback f on f.message_id = m.id and f.user_id = %s
+        where m.conversation_id = %s
+        order by m.created_at asc
         """,
-        (conversation_id,),
+        (user_id, conversation_id),
     )
     return ConversationDetail(
         conversation=_conversation_summary(conversation),
