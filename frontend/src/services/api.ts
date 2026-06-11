@@ -16,6 +16,8 @@ import type {
   ConversationDetail,
   ConversationSummary,
   CurrentUserResponse,
+  FeedbackCreateRequest,
+  FeedbackResponse,
   HealthResponse,
   MessageCreateRequest,
   QueryRequest,
@@ -134,6 +136,17 @@ export async function sendMessage(
   payload: MessageCreateRequest
 ): Promise<ChatResponse> {
   return request<ChatResponse>(`/api/v1/conversations/${conversationId}/messages`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+/** POST /api/v1/messages/:id/feedback */
+export async function submitFeedback(
+  messageId: string,
+  payload: FeedbackCreateRequest
+): Promise<FeedbackResponse> {
+  return request<FeedbackResponse>(`/api/v1/messages/${messageId}/feedback`, {
     method: "POST",
     body: payload,
   });

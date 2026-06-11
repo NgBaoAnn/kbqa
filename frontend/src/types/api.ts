@@ -44,6 +44,7 @@ export interface MessageRecord {
   content: string;
   response_type?: string | null;
   data?: Record<string, unknown>[] | Record<string, unknown> | null;
+  sources?: ChatSource[];
   safety?: SafetyPayload | null;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -96,6 +97,42 @@ export interface ChatResponse {
   suggested_questions: string[];
   metadata: ChatMetadata;
 }
+
+// ── Feedback ──────────────────────────────────────────────────────────────────
+
+export type FeedbackRating = "up" | "down";
+
+export type FeedbackReason =
+  | "helpful"
+  | "incorrect"
+  | "unsafe"
+  | "unclear"
+  | "incomplete"
+  | "other";
+
+export interface FeedbackCreateRequest {
+  rating: FeedbackRating;
+  reason?: FeedbackReason | null;
+  comment?: string | null;
+}
+
+export interface FeedbackResponse {
+  id: string;
+  message_id: string;
+  rating: string;
+  reason: string | null;
+  review_item_id: string | null;
+  created_at: string;
+}
+
+export type ChatSourceType =
+  | "cypher"
+  | "neo4j"
+  | "lightrag_entity"
+  | "lightrag_relationship"
+  | "lightrag_chunk"
+  | "document"
+  | "other";
 
 // ── Legacy (legacy /api/v1/query endpoint, kept for compat) ──────────────────
 
