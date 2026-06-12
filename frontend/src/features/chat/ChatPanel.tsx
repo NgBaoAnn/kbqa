@@ -34,6 +34,7 @@ import type {
   ChatResponse,
   ChatSource,
   ConversationSummary,
+  DisambiguationOption,
   MessageRecord,
   MessageTraceResponse,
   SafetyPayload,
@@ -269,6 +270,17 @@ interface AssistantMsgProps {
 }
 
 function AssistantMsg({ response, time, onComposerFill }: AssistantMsgProps) {
+  function handleDisambiguationSelect(
+    option: DisambiguationOption,
+    originalQuestion: string,
+  ) {
+    const baseQuestion = originalQuestion.trim();
+    const nextQuestion = baseQuestion
+      ? `Tôi muốn hỏi về ${option.label}: ${baseQuestion}`
+      : `Tôi muốn hỏi về ${option.label}`;
+    onComposerFill?.(nextQuestion);
+  }
+
   return (
     <div className="message assistant-message">
       <div className="assistant-header">
@@ -280,7 +292,8 @@ function AssistantMsg({ response, time, onComposerFill }: AssistantMsgProps) {
       <div className="assistant-body">
         <ChatResponseRenderer
           response={response}
-          onDisambiguationSelect={onComposerFill}
+          onDisambiguationSelect={handleDisambiguationSelect}
+          onSuggestedQuestionSelect={onComposerFill}
         />
 
         {/* Sources panel */}
@@ -348,7 +361,7 @@ function RecordMsg({ record, sources, onComposerFill }: RecordMsgProps) {
         requires_emergency_notice: false,
         disclaimer: "Thông tin chỉ mang tính chất tham khảo.",
       },
-      suggested_questions: [],
+      suggested_questions: record.suggested_questions ?? [],
       metadata: {
         ...record.metadata,
         engine: (record.metadata?.engine as string) ?? "—",
@@ -498,6 +511,7 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
               response_type: response.response_type,
               data: response.data ?? null,
               safety: response.safety,
+              suggested_questions: response.suggested_questions ?? [],
               metadata: response.metadata as unknown as Record<string, unknown>,
               created_at: new Date().toISOString(),
             },
