@@ -54,6 +54,14 @@ function timeLabel() {
   }).format(new Date());
 }
 
+function createMessageId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 // ── Friendly error messages ───────────────────────────────────────────────────
 
 function friendlyError(err: unknown): string {
@@ -328,7 +336,7 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
     // Optimistic user message + pending placeholder
     setMessages((prev) => [
       ...prev,
-      { kind: "optimistic-user", id: crypto.randomUUID(), content: trimmed, createdAt: now },
+      { kind: "optimistic-user", id: createMessageId(), content: trimmed, createdAt: now },
       { kind: "optimistic-sending" },
     ]);
 
@@ -363,7 +371,7 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
           ...withoutPending,
           {
             kind: "error",
-            id: crypto.randomUUID(),
+            id: createMessageId(),
             content: friendlyError(err),
           },
         ];
