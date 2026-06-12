@@ -204,6 +204,28 @@ class ChatResponse(BaseModel):
     metadata: ChatMetadata
 
 
+# ── Sprint 3: Streaming chat ─────────────────────────────────────────────
+
+StreamEventType = Literal["stage", "delta", "sources", "metadata", "final", "error"]
+StreamStage = Literal["routing", "retrieving", "generating", "persisting"]
+
+
+class StreamStagePayload(BaseModel):
+    stage: StreamStage
+    message: str
+
+
+class StreamDeltaPayload(BaseModel):
+    content: str = ""
+    streaming_supported: bool = False
+
+
+class StreamErrorPayload(BaseModel):
+    error_code: str
+    message: str
+    status_code: int | None = None
+
+
 # ── Internal service contract ─────────────────────────────────────────────
 
 

@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.config import DISABLE_CYPHER_PATH
@@ -58,6 +59,7 @@ MSG_NO_DATA = "Không tìm thấy thông tin về chủ đề này trong cơ s�
 # ── Engine name constants ─────────────────────────────────────────────────
 ENGINE_CYPHER = "cypher_direct"
 ENGINE_LIGHTRAG = "lightrag"
+LightRagExecutor = Callable[[str, str | None, float], Awaitable[dict[str, Any]]]
 
 
 async def run_pipeline(
@@ -87,7 +89,7 @@ async def run_pipeline(
     # ── Step 0: Wrap in timeout ────────────────────────────────────────────
     try:
         result = await asyncio.wait_for(
-            _run_pipeline_inner(question, mode, start_time),
+            _run_pipeline_inner(question, mode, start_time, _execute_lightrag_path),
             timeout=PIPELINE_TIMEOUT_SECONDS,
         )
         return _with_request_context(result, preferences)
@@ -102,10 +104,46 @@ async def run_pipeline(
         ), preferences)
 
 
+async def run_pipeline_stream(
+    question: str,
+    mode: str | None = None,
+    preferences: dict[str, Any] | None = None,
+    on_delta: Callable[[str], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
+    """Execute the pipeline while streaming native LightRAG chunks when available."""
+    from ai_engine.utils.response_formatter import format_error_response
+
+    start_time = time.time()
+
+    async def _streaming_lightrag_executor(
+        q: str,
+        m: str | None,
+        s: float,
+    ) -> dict[str, Any]:
+        return await _execute_lightrag_path_stream(q, m, s, on_delta)
+
+    try:
+        result = await asyncio.wait_for(
+            _run_pipeline_inner(question, mode, start_time, _streaming_lightrag_executor),
+            timeout=PIPELINE_TIMEOUT_SECONDS,
+        )
+        return _with_request_context(result, preferences)
+    except asyncio.TimeoutError:
+        elapsed_ms = (time.time() - start_time) * 1000
+        logger.error("Pipeline stream timeout after %.0fms", elapsed_ms)
+        return _with_request_context(format_error_response(
+            error_code="TIMEOUT",
+            error_message=f"Pipeline exceeded {PIPELINE_TIMEOUT_SECONDS}s timeout",
+            user_message=MSG_TIMEOUT,
+            execution_time_ms=elapsed_ms,
+        ), preferences)
+
+
 async def _run_pipeline_inner(
     question: str,
     mode: str | None,
     start_time: float,
+    lightrag_executor: LightRagExecutor,
 ) -> dict[str, Any]:
     """Inner pipeline logic (wrapped by timeout in run_pipeline).
 
@@ -132,7 +170,7 @@ async def _run_pipeline_inner(
         if DISABLE_CYPHER_PATH or mode:
             reason = "DISABLE_CYPHER_PATH" if DISABLE_CYPHER_PATH else f"mode='{mode}'"
             logger.info("Pipeline: %s → LightRAG (bypass Cypher)", reason)
-            return await _execute_lightrag_path(question, mode or _LIGHTRAG_MODE, start_time)
+            return await lightrag_executor(question, mode or _LIGHTRAG_MODE, start_time)
 
         # ── Step 3: LLM Intent Extraction (Accuracy First) ──────────────────
         query_type, entity = await extract_intent_with_llm(question)
@@ -158,7 +196,7 @@ async def _run_pipeline_inner(
         if query_type in _FIND_BY_TYPES:
             if not entity:
                 logger.info("Reverse type=%s but no keyword → LightRAG", query_type)
-                return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
+                return await lightrag_executor(question, _LIGHTRAG_MODE, start_time)
             logger.info(
                 "Route → CYPHER (reverse type=%s keyword='%s' method=%s)",
                 query_type, entity, routing_method,
@@ -169,12 +207,13 @@ async def _run_pipeline_inner(
                 query_type=query_type,
                 start_time=start_time,
                 exact=False,
+                lightrag_executor=lightrag_executor,
             )
 
         # ── Step 5: No entity identified → LIGHTRAG ───────────────────────
         if not entity:
             logger.info("No entity extracted → LightRAG (method=%s)", routing_method)
-            return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
+            return await lightrag_executor(question, _LIGHTRAG_MODE, start_time)
 
         # ── Step 6: Data-driven check — is entity in KG? ──────────────────
         canonical, variants = await _disambiguate_entity(entity)
@@ -182,7 +221,7 @@ async def _run_pipeline_inner(
         if not variants:
             # KG has no record for this entity → auto-fallback to semantic path
             logger.info("Entity '%s' not in KG → LightRAG auto-fallback", entity)
-            return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
+            return await lightrag_executor(question, _LIGHTRAG_MODE, start_time)
 
         if canonical is None:
             # Multiple candidates, no clear winner → ask user to narrow down
@@ -204,6 +243,7 @@ async def _run_pipeline_inner(
             query_type=query_type,
             start_time=start_time,
             exact=True,
+            lightrag_executor=lightrag_executor,
         )
 
     except Exception as e:
@@ -330,6 +370,7 @@ async def _execute_cypher_path(
     query_type: str | None,
     start_time: float,
     exact: bool = False,
+    lightrag_executor: LightRagExecutor | None = None,
 ) -> dict[str, Any]:
     """Execute the Cypher path via cypher_graph_service facade.
 
@@ -355,7 +396,8 @@ async def _execute_cypher_path(
     if not result["success"]:
         if result.get("fallback"):
             logger.info("Cypher path → LightRAG fallback: %s", result.get("reason"))
-            return await _execute_lightrag_path(question, _LIGHTRAG_MODE, start_time)
+            executor = lightrag_executor or _execute_lightrag_path
+            return await executor(question, _LIGHTRAG_MODE, start_time)
         logger.error("Cypher hard error: %s", result.get("error_code"))
         return format_error_response(
             error_code=result["error_code"],
@@ -480,4 +522,74 @@ async def _execute_lightrag_path(
         result.get("mode", "unknown"),
     )
 
+    return response
+
+
+async def _execute_lightrag_path_stream(
+    question: str,
+    mode: str | None,
+    start_time: float,
+    on_delta: Callable[[str], Awaitable[None]] | None,
+) -> dict[str, Any]:
+    """Execute LightRAG semantic path with native token/chunk streaming."""
+    from ai_engine.services import lightrag_service
+    from ai_engine.utils.response_formatter import (
+        format_error_response,
+        format_lightrag_response,
+    )
+
+    logger.info("LightRAG streaming path: mode=%s", mode or "default")
+
+    try:
+        effective_mode, chunks = await lightrag_service.stream_query(
+            question=question,
+            mode=mode,
+        )
+        answer_parts: list[str] = []
+        async for chunk in chunks:
+            text = str(chunk)
+            if not text:
+                continue
+            answer_parts.append(text)
+            if on_delta is not None:
+                await on_delta(text)
+    except Exception as exc:
+        elapsed_ms = (time.time() - start_time) * 1000
+        error_msg = str(exc)
+        logger.error("LightRAG streaming query failed: %s", error_msg)
+        if "not installed" in error_msg.lower():
+            return format_error_response(
+                error_code="MODEL_UNAVAILABLE",
+                error_message=error_msg,
+                user_message=MSG_MODEL_UNAVAILABLE,
+                execution_time_ms=elapsed_ms,
+            )
+        if "invalid query mode" in error_msg.lower():
+            return format_error_response(
+                error_code="INVALID_QUESTION",
+                error_message=error_msg,
+                user_message=MSG_INVALID_MODE,
+                execution_time_ms=elapsed_ms,
+            )
+        return format_error_response(
+            error_code="LIGHTRAG_QUERY_FAILED",
+            error_message=error_msg,
+            user_message=MSG_GENERATION_FAILED,
+            execution_time_ms=elapsed_ms,
+        )
+
+    elapsed_ms = (time.time() - start_time) * 1000
+    response = format_lightrag_response(
+        raw_answer="".join(answer_parts),
+        question=question,
+        query_mode=effective_mode,
+        execution_time_ms=elapsed_ms,
+    )
+
+    logger.info(
+        "LightRAG streaming path completed in %.0fms (type=%s, mode=%s)",
+        elapsed_ms,
+        response["response_type"],
+        effective_mode,
+    )
     return response

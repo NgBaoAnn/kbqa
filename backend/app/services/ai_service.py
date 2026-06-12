@@ -192,6 +192,22 @@ def _build_result_from_pipeline(
     )
 
 
+def build_result_from_pipeline(
+    *,
+    pipeline_result: dict[str, Any],
+    question: str,
+    execution_time_ms: float,
+    preferences: dict[str, Any] | None = None,
+) -> AIServiceResult:
+    """Public normalizer for streaming and non-streaming pipeline results."""
+    return _build_result_from_pipeline(
+        pipeline_result=pipeline_result,
+        question=question,
+        execution_time_ms=execution_time_ms,
+        preferences=preferences,
+    )
+
+
 # ── Public API ─────────────────────────────────────────────────────────────
 
 
@@ -237,10 +253,10 @@ async def answer_question(
             timeout=_ADAPTER_TIMEOUT_SECONDS,
         )
         execution_time_ms = (time.time() - start_time) * 1000
-        return _build_result_from_pipeline(
-            pipeline_result,
-            question,
-            execution_time_ms,
+        return build_result_from_pipeline(
+            pipeline_result=pipeline_result,
+            question=question,
+            execution_time_ms=execution_time_ms,
             preferences=preferences,
         )
 

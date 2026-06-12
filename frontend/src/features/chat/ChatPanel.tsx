@@ -24,20 +24,30 @@ import {
   AlertCircle,
   Bot,
   CircleAlert,
+  Download,
+  FileText,
   GitBranch,
   Loader2,
   Send,
   X,
 } from "lucide-react";
-import { getConversation, getMessageTrace, sendMessage } from "../../services/api";
+import {
+  exportConversation,
+  getConversation,
+  getMessageTrace,
+  sendMessage,
+  sendMessageStream,
+} from "../../services/api";
 import type {
   ChatResponse,
   ChatSource,
   ConversationSummary,
   DisambiguationOption,
+  ExportFormat,
   MessageRecord,
   MessageTraceResponse,
   SafetyPayload,
+  StreamStage,
 } from "../../types/api";
 import { ChatResponseRenderer } from "../../components/ResponseRenderer";
 import { SourcePanel } from "../../components/SourcePanel";
@@ -48,8 +58,15 @@ import { FeedbackControls } from "../../components/FeedbackControls";
 type UIMessage =
   | { kind: "record"; data: MessageRecord; sources?: ChatSource[] }
   | { kind: "optimistic-user"; id: string; content: string; createdAt: string }
-  | { kind: "optimistic-sending" }
+  | { kind: "optimistic-sending"; stage?: StreamStage; content?: string }
   | { kind: "error"; id: string; content: string };
+
+const STAGE_LABELS: Record<StreamStage, string> = {
+  routing: "Đang định tuyến câu hỏi…",
+  retrieving: "Đang truy xuất ngữ cảnh…",
+  generating: "Đang tạo câu trả lời…",
+  persisting: "Đang lưu câu trả lời…",
+};
 
 function timeLabel() {
   return new Intl.DateTimeFormat("vi-VN", {
@@ -384,15 +401,24 @@ function RecordMsg({ record, sources, onComposerFill }: RecordMsgProps) {
   return null;
 }
 
-function PendingMsg() {
+function PendingMsg({ stage, content }: { stage?: StreamStage; content?: string }) {
+  const hasContent = Boolean(content?.trim());
+
   return (
     <div className="message pending-message">
-      <div className="pending-bubble">
-        <div className="assistant-avatar" aria-hidden="true">
-          <Bot size={15} />
-        </div>
-        <div className="typing-dots">
-          <span /><span /><span />
+      <div className="assistant-header">
+        <div className="assistant-avatar" aria-hidden="true"><Bot size={15} /></div>
+        <span className="assistant-name">AegisHealth</span>
+      </div>
+      <div className="assistant-body">
+        {hasContent && (
+          <div className="pending-answer markdown-prose">{content}</div>
+        )}
+        <div className="pending-bubble">
+          <div className="typing-dots">
+            <span /><span /><span />
+          </div>
+          <span className="pending-stage">{stage ? STAGE_LABELS[stage] : "Đang gửi…"}</span>
         </div>
       </div>
     </div>
@@ -422,8 +448,12 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [exporting, setExporting] = useState<ExportFormat | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pendingDeltaBufferRef = useRef("");
+  const pendingDeltaFrameRef = useRef<number | null>(null);
 
   const canSubmit = question.trim().length > 0 && !isSending && loadState === "ready";
 
@@ -474,6 +504,89 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
     setTimeout(() => textareaRef.current?.focus(), 50);
   }
 
+  function appendAssistantResponse(response: ChatResponse) {
+    setMessages((prev) => {
+      const withoutPending = prev.filter((m) => m.kind !== "optimistic-sending");
+      return [
+        ...withoutPending,
+        {
+          kind: "record",
+          data: {
+            id: response.message_id,
+            role: "assistant",
+            content: response.answer,
+            response_type: response.response_type,
+            data: response.data ?? null,
+            safety: response.safety,
+            suggested_questions: response.suggested_questions ?? [],
+            metadata: response.metadata as unknown as Record<string, unknown>,
+            created_at: new Date().toISOString(),
+          },
+          sources: response.sources ?? [],
+        },
+      ];
+    });
+  }
+
+  function updatePendingStage(stage: StreamStage) {
+    setMessages((prev) =>
+      prev.map((m) => (m.kind === "optimistic-sending" ? { ...m, stage } : m)),
+    );
+  }
+
+  const flushPendingDelta = useCallback(() => {
+    pendingDeltaFrameRef.current = null;
+    const content = pendingDeltaBufferRef.current;
+    pendingDeltaBufferRef.current = "";
+    if (!content) return;
+
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.kind === "optimistic-sending"
+          ? { ...m, content: `${m.content ?? ""}${content}` }
+          : m,
+      ),
+    );
+  }, []);
+
+  function appendPendingDelta(content: string) {
+    if (!content) return;
+    pendingDeltaBufferRef.current += content;
+    if (pendingDeltaFrameRef.current !== null) return;
+    pendingDeltaFrameRef.current = window.requestAnimationFrame(flushPendingDelta);
+  }
+
+  function clearPendingDeltaBuffer() {
+    pendingDeltaBufferRef.current = "";
+    if (pendingDeltaFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingDeltaFrameRef.current);
+      pendingDeltaFrameRef.current = null;
+    }
+  }
+
+  useEffect(() => clearPendingDeltaBuffer, []);
+
+  async function handleExport(format: ExportFormat) {
+    if (exporting) return;
+    setExportError(null);
+    setExporting(format);
+    try {
+      const { blob, filename } = await exportConversation(conversation.id, format);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      setExportError(friendlyError(err));
+    } finally {
+      setExporting(null);
+    }
+  }
+
   // ── Send message ────────────────────────────────────────────────────────
 
   async function handleSubmit(e?: FormEvent) {
@@ -495,32 +608,35 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
       { kind: "optimistic-sending" },
     ]);
 
+    let finalReceived = false;
     try {
-      const response = await sendMessage(conversation.id, { question: trimmed });
-
-      setMessages((prev) => {
-        const withoutPending = prev.filter((m) => m.kind !== "optimistic-sending");
-        return [
-          ...withoutPending,
-          {
-            kind: "record",
-            data: {
-              id: response.message_id,
-              role: "assistant",
-              content: response.answer,
-              response_type: response.response_type,
-              data: response.data ?? null,
-              safety: response.safety,
-              suggested_questions: response.suggested_questions ?? [],
-              metadata: response.metadata as unknown as Record<string, unknown>,
-              created_at: new Date().toISOString(),
-            },
-            // Preserve the full ChatResponse sources so SourcePanel works
-            sources: response.sources ?? [],
-          },
-        ];
+      const response = await sendMessageStream(conversation.id, { question: trimmed }, {
+        onEvent: (event) => {
+          if (event.event === "stage") {
+            updatePendingStage(event.data.stage);
+          }
+          if (event.event === "delta") {
+            appendPendingDelta(event.data.content);
+          }
+          if (event.event === "final") {
+            finalReceived = true;
+          }
+        },
       });
+      flushPendingDelta();
+      appendAssistantResponse(response);
     } catch (err: unknown) {
+      if (!finalReceived) {
+        try {
+          clearPendingDeltaBuffer();
+          updatePendingStage("generating");
+          const response = await sendMessage(conversation.id, { question: trimmed });
+          appendAssistantResponse(response);
+          return;
+        } catch (fallbackErr: unknown) {
+          err = fallbackErr;
+        }
+      }
       setMessages((prev) => {
         const withoutPending = prev.filter((m) => m.kind !== "optimistic-sending");
         return [
@@ -544,6 +660,35 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
 
   return (
     <div className="chat-panel">
+      <div className="chat-toolbar">
+        <div className="chat-toolbar-title">
+          <span>{conversation.title}</span>
+          {exportError && <small>{exportError}</small>}
+        </div>
+        <div className="chat-toolbar-actions" aria-label="Xuất hội thoại">
+          <button
+            type="button"
+            className="export-btn"
+            onClick={() => handleExport("markdown")}
+            disabled={!!exporting}
+            title="Tải Markdown"
+          >
+            {exporting === "markdown" ? <Loader2 size={14} className="spin" /> : <FileText size={14} />}
+            <span>MD</span>
+          </button>
+          <button
+            type="button"
+            className="export-btn"
+            onClick={() => handleExport("pdf")}
+            disabled={!!exporting}
+            title="Tải PDF"
+          >
+            {exporting === "pdf" ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+            <span>PDF</span>
+          </button>
+        </div>
+      </div>
+
       {/* ── Messages area ── */}
       <div className="chat-messages">
         {loadState === "loading" && (
@@ -584,7 +729,7 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
                 return <UserMsg key={msg.id} content={msg.content} time={msg.createdAt} />;
               }
               if (msg.kind === "optimistic-sending") {
-                return <PendingMsg key={`pending-${idx}`} />;
+                return <PendingMsg key={`pending-${idx}`} stage={msg.stage} content={msg.content} />;
               }
               if (msg.kind === "error") {
                 return <ErrorMsg key={msg.id} content={msg.content} />;

@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from collections.abc import AsyncIterator
 from typing import Any
 
 # ── httpx 0.28.x workaround ──────────────────────────────────────────────
@@ -312,6 +313,42 @@ async def query(
             "success": False,
             "error": str(e),
         }
+
+
+async def stream_query(
+    question: str,
+    mode: str | None = None,
+    only_need_context: bool = False,
+) -> tuple[str, AsyncIterator[str]]:
+    """Query LightRAG with native token/chunk streaming enabled."""
+    effective_mode = EFFECTIVE_QUERY_MODE if FORCE_LIGHTRAG_NAIVE_MODE else (mode or DEFAULT_QUERY_MODE)
+
+    try:
+        from lightrag import QueryParam
+    except ImportError as exc:
+        raise RuntimeError("LightRAG is not installed.") from exc
+
+    rag = await get_lightrag_instance()
+    param = QueryParam(
+        mode=effective_mode,
+        only_need_context=only_need_context,
+        stream=True,
+        user_prompt=MEDICAL_USER_PROMPT,
+        top_k=20,
+        chunk_top_k=10,
+        max_entity_tokens=2000,
+        max_relation_tokens=2000,
+        max_total_tokens=6000,
+    )
+    result = await rag.aquery(question, param=param)
+
+    if isinstance(result, str):
+        async def _single_chunk() -> AsyncIterator[str]:
+            yield result
+
+        return effective_mode, _single_chunk()
+
+    return effective_mode, result
 
 
 async def health_check() -> dict[str, Any]:
