@@ -125,6 +125,37 @@ export interface ChatResponse {
   feedback?: { rating: "up" | "down"; reason?: string | null } | null;
 }
 
+// ── Sprint 3: Streaming chat ────────────────────────────────────────────────
+
+export type StreamEventType = "stage" | "delta" | "sources" | "metadata" | "final" | "error";
+export type StreamStage = "routing" | "retrieving" | "generating" | "persisting";
+
+export interface StreamStagePayload {
+  stage: StreamStage;
+  message: string;
+}
+
+export interface StreamDeltaPayload {
+  content: string;
+  streaming_supported: boolean;
+}
+
+export interface StreamErrorPayload {
+  error_code: string;
+  message: string;
+  status_code?: number | null;
+}
+
+export type StreamEvent =
+  | { event: "stage"; data: StreamStagePayload }
+  | { event: "delta"; data: StreamDeltaPayload }
+  | { event: "sources"; data: { sources: ChatSource[] } }
+  | { event: "metadata"; data: ChatMetadata }
+  | { event: "final"; data: ChatResponse }
+  | { event: "error"; data: StreamErrorPayload };
+
+export type ExportFormat = "markdown" | "pdf";
+
 // ── Feedback ──────────────────────────────────────────────────────────────────
 
 export type FeedbackRating = "up" | "down";

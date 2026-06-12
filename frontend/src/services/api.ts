@@ -19,6 +19,7 @@ import type {
   CurrentUserResponse,
   DiseaseDetailResponse,
   DiseaseListResponse,
+  ExportFormat,
   FeedbackCreateRequest,
   FeedbackResponse,
   HealthResponse,
@@ -27,6 +28,8 @@ import type {
   QueryRequest,
   QueryResponse,
   ReviewQueueResponse,
+  StreamEvent,
+  StreamEventType,
   UserPreferences,
   UserPreferencesResponse,
 } from "../types/api";
@@ -105,6 +108,49 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return payload as T;
 }
 
+async function authenticatedJsonHeaders(): Promise<Record<string, string>> {
+  const token = await getAccessToken();
+  if (!token) {
+    throw {
+      message: "Session invalid or missing. Please sign in again.",
+      error_code: "AUTHENTICATION_REQUIRED",
+      status: 401,
+    };
+  }
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  };
+}
+
+function parseSseBlock(block: string): StreamEvent | null {
+  let event: StreamEventType | null = null;
+  const dataLines: string[] = [];
+
+  for (const line of block.split("\n")) {
+    if (line.startsWith("event:")) {
+      event = line.slice("event:".length).trim() as StreamEventType;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trimStart());
+    }
+  }
+
+  if (!event || dataLines.length === 0) return null;
+  return { event, data: JSON.parse(dataLines.join("\n")) } as StreamEvent;
+}
+
+async function throwResponseError(response: Response): Promise<never> {
+  const payload = await response.json().catch(() => null);
+  const detail = payload?.detail ?? payload;
+  const errorCode =
+    typeof detail === "object" && detail !== null ? detail?.error_code : undefined;
+  const message =
+    (typeof detail === "object" && detail !== null ? detail?.message : undefined) ??
+    `Request failed with status ${response.status}`;
+  throw { message, error_code: errorCode, detail, status: response.status };
+}
+
 // ── Public API functions ──────────────────────────────────────────────────────
 
 /** GET /api/v1/health — unauthenticated */
@@ -146,6 +192,102 @@ export async function sendMessage(
     method: "POST",
     body: payload,
   });
+}
+
+interface SendMessageStreamOptions {
+  onEvent?: (event: StreamEvent) => void;
+}
+
+/** POST /api/v1/conversations/:id/messages/stream — fetch-based SSE with auth */
+export async function sendMessageStream(
+  conversationId: string,
+  payload: MessageCreateRequest,
+  options: SendMessageStreamOptions = {},
+): Promise<ChatResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/conversations/${conversationId}/messages/stream`,
+    {
+      method: "POST",
+      headers: await authenticatedJsonHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    await throwResponseError(response);
+  }
+  if (!response.body) {
+    throw {
+      message: "Streaming response body is unavailable.",
+      error_code: "STREAM_BODY_UNAVAILABLE",
+      status: response.status,
+    };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResponse: ChatResponse | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() ?? "";
+
+    for (const block of blocks) {
+      const event = parseSseBlock(block);
+      if (!event) continue;
+      options.onEvent?.(event);
+      if (event.event === "error") {
+        throw {
+          message: event.data.message,
+          error_code: event.data.error_code,
+          status: event.data.status_code ?? response.status,
+        };
+      }
+      if (event.event === "final") {
+        finalResponse = event.data;
+      }
+    }
+
+    if (done) break;
+  }
+
+  if (!finalResponse) {
+    throw {
+      message: "Streaming ended before a final response was received.",
+      error_code: "STREAM_FINAL_MISSING",
+      status: response.status,
+    };
+  }
+  return finalResponse;
+}
+
+/** GET /api/v1/conversations/:id/export?format=markdown|pdf */
+export async function exportConversation(
+  conversationId: string,
+  format: ExportFormat,
+): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/conversations/${conversationId}/export?format=${format}`,
+    {
+      method: "GET",
+      headers: await authenticatedJsonHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    await throwResponseError(response);
+  }
+
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const fallback = format === "pdf" ? "conversation.pdf" : "conversation.md";
+  return {
+    blob: await response.blob(),
+    filename: match?.[1] ?? fallback,
+  };
 }
 
 /** POST /api/v1/messages/:id/feedback */
