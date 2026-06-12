@@ -43,3 +43,11 @@ DISABLE_CYPHER_PATH = os.getenv("DISABLE_CYPHER_PATH", "false").lower() == "true
 
 # ── API Version ───────────────────────────────────────────────────────────
 API_VERSION = "1.0.0"
+
+# ── Pipeline / Model Version Tracking (Sprint 1) ─────────────────────────
+# These values are persisted into assistant message metadata and query_logs
+# so every response can be traced to the exact prompt/model/KG/pipeline used.
+PROMPT_VERSION = os.getenv("PROMPT_VERSION", "v1.0.0")
+MODEL_NAME = os.getenv("MODEL_NAME", os.getenv("LLM_MODEL_NAME", "unknown"))
+KG_VERSION = os.getenv("KG_VERSION", "v1.0.0")
+PIPELINE_VERSION = os.getenv("PIPELINE_VERSION", "v1.0.0")
