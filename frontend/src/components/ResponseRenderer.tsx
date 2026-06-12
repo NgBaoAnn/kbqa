@@ -20,7 +20,13 @@ import {
   HelpCircle,
   ChevronRight,
 } from "lucide-react";
-import type { ChatResponse, QueryResponse, SafetyPayload } from "../types/api";
+import type {
+  ChatResponse,
+  ChatResponseData,
+  DisambiguationOption,
+  QueryResponse,
+  SafetyPayload,
+} from "../types/api";
 
 // ── Safety block ──────────────────────────────────────────────────────────────
 
@@ -111,12 +117,12 @@ function TableBody({
   data,
   answer,
 }: {
-  data: Record<string, unknown>[] | Record<string, unknown> | null | undefined;
+  data: ChatResponseData | undefined;
   answer: string;
 }) {
   // Normalise data to a row array
   const rows: Record<string, unknown>[] = Array.isArray(data)
-    ? data
+    ? (data as Record<string, unknown>[])
     : data && typeof data === "object"
     ? [data]
     : [];
@@ -161,12 +167,10 @@ function TableBody({
 
 // ── Disambiguation renderer ───────────────────────────────────────────────────
 
-interface DisambiguationOption {
-  label?: string;
+type LooseDisambiguationOption = Partial<DisambiguationOption> & {
   name?: string;
-  description?: string;
   value?: string;
-}
+};
 
 function DisambiguationBody({
   answer,
@@ -174,11 +178,20 @@ function DisambiguationBody({
   onSelect,
 }: {
   answer: string;
-  data: Record<string, unknown>[] | Record<string, unknown> | null | undefined;
-  onSelect?: (label: string) => void;
+  data: ChatResponseData | undefined;
+  onSelect?: (option: DisambiguationOption) => void;
 }) {
   const options: DisambiguationOption[] = Array.isArray(data)
-    ? (data as DisambiguationOption[])
+    ? (data as LooseDisambiguationOption[]).map((opt, index) => {
+        const label = opt.label ?? opt.name ?? opt.value ?? `Lựa chọn ${index + 1}`;
+        return {
+          id: opt.id ?? `option-${index}`,
+          label,
+          description: opt.description ?? "",
+          entity_type: opt.entity_type ?? "Disease",
+          confidence: typeof opt.confidence === "number" ? opt.confidence : 0,
+        };
+      })
     : [];
 
   return (
@@ -191,18 +204,17 @@ function DisambiguationBody({
       {options.length > 0 && (
         <div className="disambiguation-options" role="list" aria-label="Các lựa chọn">
           {options.map((opt, i) => {
-            const label = opt.label ?? opt.name ?? opt.value ?? `Lựa chọn ${i + 1}`;
             return (
               <button
-                key={i}
+                key={opt.id || i}
                 type="button"
                 className="disambiguation-option"
                 role="listitem"
-                onClick={() => onSelect?.(label)}
+                onClick={() => onSelect?.(opt)}
               >
                 <ChevronRight size={13} />
                 <span>
-                  <strong>{label}</strong>
+                  <strong>{opt.label}</strong>
                   {opt.description && (
                     <span className="disambiguation-desc"> — {opt.description}</span>
                   )}
@@ -220,13 +232,14 @@ function DisambiguationBody({
 
 interface ChatResponseRendererProps {
   response: ChatResponse;
-  /** Called when a disambiguation option is clicked — caller can pre-fill composer */
-  onDisambiguationSelect?: (label: string) => void;
+  onDisambiguationSelect?: (option: DisambiguationOption, originalQuestion: string) => void;
+  onSuggestedQuestionSelect?: (question: string) => void;
 }
 
 export function ChatResponseRenderer({
   response,
   onDisambiguationSelect,
+  onSuggestedQuestionSelect,
 }: ChatResponseRendererProps) {
   const showEmergency = response.safety?.requires_emergency_notice === true;
 
@@ -242,6 +255,10 @@ export function ChatResponseRenderer({
   const showSafetyBlock =
     response.safety &&
     (response.safety.level !== "normal" || hadDisclaimer);
+  const originalQuestion =
+    typeof response.metadata?.original_question === "string"
+      ? response.metadata.original_question
+      : "";
 
   return (
     <div className="response-block">
@@ -257,7 +274,7 @@ export function ChatResponseRenderer({
         <DisambiguationBody
           answer={response.answer}
           data={response.data}
-          onSelect={onDisambiguationSelect}
+          onSelect={(option) => onDisambiguationSelect?.(option, originalQuestion)}
         />
       ) : (
         /* text | source_list | unknown → markdown */
@@ -277,7 +294,7 @@ export function ChatResponseRenderer({
                 key={i}
                 type="button"
                 className="suggested-chip"
-                onClick={() => onDisambiguationSelect?.(q)}
+                onClick={() => onSuggestedQuestionSelect?.(q)}
               >
                 {q}
               </button>

@@ -615,6 +615,98 @@ class TestAIServiceAnswerQuestion:
         mock_pipeline.assert_awaited_once_with(question="Q", mode="local")
 
     @pytest.mark.asyncio
+    async def test_follow_up_questions_are_limited_to_three(self):
+        from app.services import ai_service
+
+        mock_response = _make_success_pipeline_response()
+        mock_response["suggested_questions"] = ["Q1?", "Q2?", "Q3?", "Q4?"]
+        with patch(
+            "app.services.pipeline.run_pipeline",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await ai_service.answer_question(question="Bệnh tiểu đường là gì?")
+
+        assert result.suggested_questions == ["Q1?", "Q2?", "Q3?"]
+
+    @pytest.mark.asyncio
+    async def test_emergency_response_has_no_suggested_questions(self):
+        from app.services import ai_service
+
+        mock_response = _make_success_pipeline_response(response_type="warning")
+        with patch(
+            "app.services.pipeline.run_pipeline",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await ai_service.answer_question(question="Tôi đang bị đau ngực dữ dội")
+
+        assert result.suggested_questions == []
+
+    @pytest.mark.asyncio
+    async def test_error_response_has_no_suggested_questions(self):
+        from app.services import ai_service
+
+        with patch(
+            "app.services.pipeline.run_pipeline",
+            new_callable=AsyncMock,
+            return_value=_make_error_pipeline_response("LIGHTRAG_QUERY_FAILED"),
+        ):
+            result = await ai_service.answer_question(question="Q")
+
+        assert result.suggested_questions == []
+
+    @pytest.mark.asyncio
+    async def test_disambiguation_structured_data_passes_through(self):
+        from app.services import ai_service
+
+        options = [
+            {
+                "id": "disease-cum-a",
+                "label": "Bệnh cúm A",
+                "description": "Bệnh trong cơ sở tri thức VietMedKG.",
+                "entity_type": "Disease",
+                "confidence": 0.95,
+            }
+        ]
+        mock_response = _make_success_pipeline_response(response_type="disambiguation")
+        mock_response["answer"] = "Vui lòng chọn bệnh bạn muốn hỏi."
+        mock_response["data"] = options
+        with patch(
+            "app.services.pipeline.run_pipeline",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await ai_service.answer_question(question="Cúm có triệu chứng gì?")
+
+        assert result.response_type == "disambiguation"
+        assert result.data == options
+        assert result.suggested_questions == []
+
+    @pytest.mark.asyncio
+    async def test_preferences_passed_to_pipeline_and_metadata(self):
+        from app.services import ai_service
+
+        prefs = {
+            "language": "vi",
+            "explanation_level": "expert",
+            "answer_style": "detailed",
+        }
+        mock_response = _make_success_pipeline_response()
+        with patch(
+            "app.services.pipeline.run_pipeline",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_pipeline:
+            result = await ai_service.answer_question(question="Q", preferences=prefs)
+
+        mock_pipeline.assert_awaited_once_with(question="Q", mode=None, preferences=prefs)
+        assert result.metadata.language == "vi"
+        assert result.metadata.explanation_level == "expert"
+        assert result.metadata.answer_style == "detailed"
+        assert result.raw_engine_metadata["preferences"] == prefs
+
+    @pytest.mark.asyncio
     async def test_raw_engine_metadata_available_for_query_log(self):
         """chat_service (Người 2) needs raw_engine_metadata to write query_logs."""
         from app.services import ai_service

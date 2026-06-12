@@ -30,6 +30,7 @@ from app.models.contracts import (
     VersionMetadata,
 )
 from app.services import ai_service  # module-level so tests can patch it
+from app.services import preference_service
 from app.services import versioning_service
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,11 @@ def _message_record(row: dict[str, Any]) -> MessageRecord:
     r = dict(row)
     rating = r.pop("feedback_rating", None)
     reason = r.pop("feedback_reason", None)
+    metadata = r.get("metadata") or {}
+    if isinstance(metadata, dict):
+        suggestions = metadata.get("suggested_questions")
+        if isinstance(suggestions, list):
+            r["suggested_questions"] = [str(q) for q in suggestions if str(q).strip()]
     if rating:
         r["feedback"] = {"rating": rating, "reason": reason}
     return MessageRecord(**r)
@@ -144,6 +150,8 @@ def _persist_query_log(
     }
     if raw.get("error_code"):
         log_meta["error_code"] = raw["error_code"]
+    if isinstance(raw.get("preferences"), dict):
+        log_meta["preferences"] = raw["preferences"]
 
     # Sprint 1: merge version metadata into query log
     log_meta.update(versioning_service.get_version_metadata())
@@ -312,10 +320,16 @@ async def create_message(
     # ai_service_module allows tests to inject a mock without patching the global
     # import. Production code uses the module-level `ai_service` (patchable).
     _ai = ai_service_module if ai_service_module is not None else ai_service
+    preferences = await preference_service.get_preferences(user_id, database=db)
     ai_result: AIServiceResult = await _ai.answer_question(
         question=payload.question,
         mode=payload.mode,
         conversation_id=conversation_id,
+        preferences={
+            "language": preferences["language"],
+            "explanation_level": preferences["explanation_level"],
+            "answer_style": preferences["answer_style"],
+        },
     )
 
     # ── Step 4-7: Atomic persist of AI result ─────────────────────────────
@@ -330,6 +344,8 @@ async def create_message(
         msg_metadata: dict[str, Any] = {
             **ai_result.metadata.model_dump(),
             **version_meta,
+            "original_question": payload.question,
+            "suggested_questions": ai_result.suggested_questions,
         }
 
         assistant_row = db.fetch_one_in_tx(

@@ -97,6 +97,7 @@ class MessageRecord(BaseModel):
     response_type: str | None = None
     data: list[dict[str, Any]] | dict[str, Any] | None = None
     safety: dict[str, Any] | None = None
+    suggested_questions: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     feedback: MessageFeedback | None = None
     created_at: str
@@ -183,6 +184,11 @@ class ChatMetadata(BaseModel):
     model_name: str | None = None
     kg_version: str | None = None
     pipeline_version: str | None = None
+    language: Literal["vi", "en"] | None = None
+    explanation_level: Literal["general", "detailed", "expert"] | None = None
+    answer_style: Literal["concise", "detailed"] | None = None
+    original_question: str | None = None
+    suggested_questions: list[str] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):

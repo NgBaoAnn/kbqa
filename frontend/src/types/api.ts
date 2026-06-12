@@ -43,9 +43,10 @@ export interface MessageRecord {
   role: "user" | "assistant" | "system";
   content: string;
   response_type?: string | null;
-  data?: Record<string, unknown>[] | Record<string, unknown> | null;
+  data?: ChatResponseData;
   sources?: ChatSource[];
   safety?: SafetyPayload | null;
+  suggested_questions: string[];
   metadata: Record<string, unknown>;
   feedback?: { rating: "up" | "down"; reason?: string | null } | null;
   created_at: string;
@@ -88,7 +89,27 @@ export interface ChatMetadata {
   model_name?: string | null;
   kg_version?: string | null;
   pipeline_version?: string | null;
+  language?: "vi" | "en" | null;
+  explanation_level?: "general" | "detailed" | "expert" | null;
+  answer_style?: "concise" | "detailed" | null;
+  original_question?: string | null;
+  suggested_questions?: string[];
+  preferences?: Partial<UserPreferences> | null;
 }
+
+export interface DisambiguationOption {
+  id: string;
+  label: string;
+  description: string;
+  entity_type: string;
+  confidence: number;
+}
+
+export type ChatResponseData =
+  | DisambiguationOption[]
+  | Record<string, unknown>[]
+  | Record<string, unknown>
+  | null;
 
 export interface ChatResponse {
   conversation_id: string;
@@ -96,7 +117,7 @@ export interface ChatResponse {
   status: "success" | "error";
   response_type: string;
   answer: string;
-  data?: Record<string, unknown>[] | Record<string, unknown> | null;
+  data?: ChatResponseData;
   sources: ChatSource[];
   safety: SafetyPayload;
   suggested_questions: string[];
