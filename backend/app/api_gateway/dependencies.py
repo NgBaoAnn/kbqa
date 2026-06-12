@@ -291,12 +291,18 @@ async def get_current_user(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise _auth_error("Missing Bearer token.")
 
-    # Pre-warm the JWKS cache using the async client before entering the
-    # sync verify path so that the network call is non-blocking.
-    if _jwks_cache is None or time.time() >= _jwks_cache_expires_at:
+    token = credentials.credentials
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise _auth_error("Malformed Supabase access token.")
+    header = _decode_base64url_json(parts[0])
+
+    # Pre-warm the JWKS cache only for asymmetric JWTs. HS256 projects verify
+    # locally with SUPABASE_JWT_SECRET and should not depend on network access.
+    if header.get("alg") == "ES256" and (_jwks_cache is None or time.time() >= _jwks_cache_expires_at):
         await _fetch_supabase_jwks_async()
 
-    token_user = verify_supabase_access_token(credentials.credentials)
+    token_user = verify_supabase_access_token(token)
 
     from app.services import user_service
 
@@ -320,6 +326,24 @@ async def get_admin_user(current_user: CurrentUser = Depends(get_current_user)) 
             detail={
                 "error_code": "ADMIN_REQUIRED",
                 "message": "Admin role is required.",
+            },
+        )
+    return current_user
+
+
+async def get_reviewer_user(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Require an active reviewer **or** admin profile.
+
+    Reviewer is a restricted role that can read review items and message traces
+    but cannot perform admin-only actions (KG import, experiment management).
+    Admins satisfy this check implicitly because admin ⊇ reviewer permissions.
+    """
+    if current_user.role not in ("reviewer", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": "REVIEWER_REQUIRED",
+                "message": "Reviewer or Admin role is required.",
             },
         )
     return current_user
