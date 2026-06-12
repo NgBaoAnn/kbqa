@@ -31,6 +31,7 @@ from typing import Any
 from app.models.contracts import AIServiceResult, ChatMetadata, SafetyPayload
 from app.services.safety_policy import safety_from_response_type
 from app.services.source_policy import build_fallback_source, normalize_sources_from_pipeline
+from app.services import suggestion_service
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ def _build_result_from_pipeline(
     pipeline_result: dict[str, Any],
     question: str,
     execution_time_ms: float,
+    preferences: dict[str, Any] | None = None,
 ) -> AIServiceResult:
     """Map a raw pipeline dict into an ``AIServiceResult``.
 
@@ -99,6 +101,18 @@ def _build_result_from_pipeline(
     if not isinstance(raw_meta, dict):
         logger.warning("ai_service: pipeline metadata is not a dict, using empty")
         raw_meta = {}
+    if preferences:
+        raw_meta = {
+            **raw_meta,
+            "language": preferences.get("language"),
+            "explanation_level": preferences.get("explanation_level"),
+            "answer_style": preferences.get("answer_style"),
+            "preferences": {
+                "language": preferences.get("language"),
+                "explanation_level": preferences.get("explanation_level"),
+                "answer_style": preferences.get("answer_style"),
+            },
+        }
 
     engine = str(raw_meta.get("engine", "unknown"))
     query_mode = str(raw_meta.get("query_mode", "unknown"))
@@ -127,6 +141,9 @@ def _build_result_from_pipeline(
         execution_time_ms=round(final_time, 1),
         source_count=len(sources),
         cypher=cypher,
+        language=raw_meta.get("language"),
+        explanation_level=raw_meta.get("explanation_level"),
+        answer_style=raw_meta.get("answer_style"),
     )
 
     # ── Error status: override answer but keep metadata ───────────────────
@@ -142,13 +159,34 @@ def _build_result_from_pipeline(
         if not answer or answer == _MSG_EMPTY:
             answer = _MSG_SYSTEM_ERROR
 
+    suggestions_allowed = (
+        status == "success"
+        and response_type not in {"warning", "disambiguation"}
+        and safety.level != "emergency"
+        and not safety.requires_emergency_notice
+    )
+    suggested_questions = []
+    if suggestions_allowed:
+        suggested_questions = suggestion_service.normalize_suggestions(
+            pipeline_result.get("suggested_questions")
+        )
+        if not suggested_questions:
+            suggested_questions = suggestion_service.generate_suggestions(
+                question=question,
+                answer=answer,
+                sources=sources,
+                safety=safety,
+                status=status,
+                response_type=response_type,
+            )
+
     return AIServiceResult(
         answer=answer,
         response_type=response_type,
         data=data,
         sources=sources,
         safety=safety,
-        suggested_questions=[],
+        suggested_questions=suggested_questions,
         metadata=metadata,
         raw_engine_metadata=raw_meta,
     )
@@ -162,6 +200,7 @@ async def answer_question(
     question: str,
     mode: str | None = None,
     conversation_id: str | None = None,  # reserved for future context injection
+    preferences: dict[str, Any] | None = None,
 ) -> AIServiceResult:
     """Execute the Hybrid GraphRAG pipeline and return a normalised result.
 
@@ -189,12 +228,21 @@ async def answer_question(
     start_time = time.time()
 
     try:
+        pipeline_kwargs: dict[str, Any] = {"question": question, "mode": mode}
+        if preferences is not None:
+            pipeline_kwargs["preferences"] = preferences
+
         pipeline_result: dict[str, Any] = await asyncio.wait_for(
-            run_pipeline(question=question, mode=mode),
+            run_pipeline(**pipeline_kwargs),
             timeout=_ADAPTER_TIMEOUT_SECONDS,
         )
         execution_time_ms = (time.time() - start_time) * 1000
-        return _build_result_from_pipeline(pipeline_result, question, execution_time_ms)
+        return _build_result_from_pipeline(
+            pipeline_result,
+            question,
+            execution_time_ms,
+            preferences=preferences,
+        )
 
     except asyncio.TimeoutError:
         execution_time_ms = (time.time() - start_time) * 1000

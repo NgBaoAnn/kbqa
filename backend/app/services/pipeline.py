@@ -31,6 +31,7 @@ Dual-path pipeline:
 import asyncio
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -62,6 +63,7 @@ ENGINE_LIGHTRAG = "lightrag"
 async def run_pipeline(
     question: str,
     mode: str | None = None,
+    preferences: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute the Hybrid Medical QA pipeline (Phương án C).
 
@@ -84,19 +86,20 @@ async def run_pipeline(
 
     # ── Step 0: Wrap in timeout ────────────────────────────────────────────
     try:
-        return await asyncio.wait_for(
+        result = await asyncio.wait_for(
             _run_pipeline_inner(question, mode, start_time),
             timeout=PIPELINE_TIMEOUT_SECONDS,
         )
+        return _with_request_context(result, preferences)
     except asyncio.TimeoutError:
         elapsed_ms = (time.time() - start_time) * 1000
         logger.error("Pipeline timeout after %.0fms", elapsed_ms)
-        return format_error_response(
+        return _with_request_context(format_error_response(
             error_code="TIMEOUT",
             error_message=f"Pipeline exceeded {PIPELINE_TIMEOUT_SECONDS}s timeout",
             user_message=MSG_TIMEOUT,
             execution_time_ms=elapsed_ms,
-        )
+        ), preferences)
 
 
 async def _run_pipeline_inner(
@@ -184,17 +187,9 @@ async def _run_pipeline_inner(
         if canonical is None:
             # Multiple candidates, no clear winner → ask user to narrow down
             elapsed_ms = (time.time() - start_time) * 1000
-            top = variants[:10]
-            names_text = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(top))
-            more = f"\n  ... và {len(variants) - 10} bệnh khác" if len(variants) > 10 else ""
-            answer = (
-                f'Tìm thấy {len(variants)} bệnh liên quan đến "{entity}". '
-                f"Bạn muốn hỏi về bệnh nào?\n\n{names_text}{more}"
-            )
-            return format_lightrag_response(
-                raw_answer=answer,
-                question=question,
-                query_mode="cypher:disambiguation",
+            return _format_disambiguation_response(
+                original_entity=entity,
+                variants=variants,
                 execution_time_ms=elapsed_ms,
             )
 
@@ -224,6 +219,67 @@ async def _run_pipeline_inner(
 
 
 # ── Entity Disambiguation ─────────────────────────────────────────────────
+
+
+def _with_request_context(
+    response: dict[str, Any],
+    preferences: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Attach request preferences to pipeline metadata for traceability."""
+    if not preferences:
+        return response
+
+    metadata = response.setdefault("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+        response["metadata"] = metadata
+
+    context = {
+        "language": preferences.get("language"),
+        "explanation_level": preferences.get("explanation_level"),
+        "answer_style": preferences.get("answer_style"),
+    }
+    metadata.update(context)
+    metadata["preferences"] = context
+    return response
+
+
+def _format_disambiguation_response(
+    *,
+    original_entity: str,
+    variants: list[str],
+    execution_time_ms: float,
+) -> dict[str, Any]:
+    options = [
+        {
+            "id": _disambiguation_option_id(label),
+            "label": label,
+            "description": "Bệnh trong cơ sở tri thức VietMedKG.",
+            "entity_type": "Disease",
+            "confidence": round(max(0.5, 0.95 - index * 0.03), 2),
+        }
+        for index, label in enumerate(variants[:10])
+    ]
+    more_text = f" Hiển thị 10/{len(variants)} lựa chọn phù hợp nhất." if len(variants) > 10 else ""
+    return {
+        "status": "success",
+        "response_type": "disambiguation",
+        "answer": (
+            f'Tìm thấy {len(variants)} bệnh liên quan đến "{original_entity}". '
+            f"Vui lòng chọn bệnh bạn muốn hỏi.{more_text}"
+        ),
+        "data": options,
+        "metadata": {
+            "query_mode": "cypher:disambiguation",
+            "execution_time_ms": round(execution_time_ms, 1),
+            "source_count": len(options),
+            "engine": ENGINE_CYPHER,
+        },
+    }
+
+
+def _disambiguation_option_id(label: str) -> str:
+    return "disease:" + re.sub(r"[^0-9A-Za-zÀ-ỹ]+", "-", label).strip("-").lower()
 
 
 async def _disambiguate_entity(entity: str) -> tuple[str | None, list[str]]:
