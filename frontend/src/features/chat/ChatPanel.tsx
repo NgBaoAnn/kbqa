@@ -24,15 +24,18 @@ import {
   AlertCircle,
   Bot,
   CircleAlert,
+  GitBranch,
   Loader2,
   Send,
+  X,
 } from "lucide-react";
-import { getConversation, sendMessage } from "../../services/api";
+import { getConversation, getMessageTrace, sendMessage } from "../../services/api";
 import type {
   ChatResponse,
   ChatSource,
   ConversationSummary,
   MessageRecord,
+  MessageTraceResponse,
   SafetyPayload,
 } from "../../types/api";
 import { ChatResponseRenderer } from "../../components/ResponseRenderer";
@@ -127,6 +130,138 @@ function UserMsg({ content, time }: { content: string; time: string }) {
   );
 }
 
+// ── VersionBadges ──────────────────────────────────────────────────────
+
+interface VersionBadgesProps {
+  messageId: string;
+  metadata: Record<string, unknown>;
+}
+
+const VERSION_LABELS: Record<string, string> = {
+  prompt_version: "Prompt",
+  model_name: "Model",
+  kg_version: "KG",
+  pipeline_version: "Pipeline",
+};
+
+function versionText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function traceValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "Chưa ghi nhận";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function VersionBadges({ messageId, metadata }: VersionBadgesProps) {
+  const [traceState, setTraceState] = useState<"idle" | "loading" | "open" | "error">("idle");
+  const [traceData, setTraceData] = useState<MessageTraceResponse | null>(null);
+
+  const versionEntries = [
+    ["prompt_version", versionText(metadata?.prompt_version), "version-badge--prompt"],
+    ["model_name", versionText(metadata?.model_name), "version-badge--model"],
+    ["kg_version", versionText(metadata?.kg_version), "version-badge--kg"],
+    ["pipeline_version", versionText(metadata?.pipeline_version), "version-badge--pipeline"],
+  ] as const;
+
+  const visibleVersions = versionEntries.filter(([, value]) => value);
+
+  async function handleOpenTrace() {
+    if (traceState === "open") {
+      setTraceState("idle");
+      return;
+    }
+    setTraceState("loading");
+    try {
+      const data = await getMessageTrace(messageId);
+      setTraceData(data);
+      setTraceState("open");
+    } catch {
+      setTraceState("error");
+    }
+  }
+
+  return (
+    <div className="version-section">
+      <div className="version-badges" aria-label="Phiên bản và trace">
+        {visibleVersions.length > 0 ? (
+          visibleVersions.map(([key, value, cls]) => (
+            <span
+              key={key}
+              className={`version-badge ${cls}`}
+              title={VERSION_LABELS[key]}
+            >
+              <span className="version-badge-label">{VERSION_LABELS[key]}</span>
+              <span className="version-badge-value">{value}</span>
+            </span>
+          ))
+        ) : (
+          <span className="version-badge version-badge--muted">
+            <span className="version-badge-label">Version</span>
+            <span className="version-badge-value">chưa ghi nhận</span>
+          </span>
+        )}
+        <button
+          type="button"
+          className="trace-btn"
+          onClick={handleOpenTrace}
+          aria-expanded={traceState === "open"}
+          title={traceState === "open" ? "Ẩn trace" : "Xem trace"}
+          disabled={traceState === "loading"}
+        >
+          {traceState === "loading" ? (
+            <Loader2 size={11} className="spin" />
+          ) : traceState === "open" ? (
+            <X size={11} />
+          ) : (
+            <GitBranch size={11} />
+          )}
+          {traceState === "open" ? "Ẩn" : "Trace"}
+        </button>
+      </div>
+
+      {traceState === "open" && traceData && (
+        <div className="trace-panel" aria-label="Trace chi tiết">
+          <div className="trace-panel-inner">
+            <p className="trace-section-label">Version metadata</p>
+            <table className="trace-table">
+              <tbody>
+                {Object.entries(traceData.version_metadata).map(([k, v]) => (
+                  <tr key={k}>
+                    <td className="trace-key">{VERSION_LABELS[k] ?? k}</td>
+                    <td className="trace-val">{traceValue(v)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {Object.keys(traceData.engine_metadata).length > 0 && (
+              <>
+                <p className="trace-section-label trace-section-label--spaced">Engine metadata</p>
+                <table className="trace-table">
+                  <tbody>
+                    {Object.entries(traceData.engine_metadata).map(([k, v]) => (
+                      <tr key={k}>
+                        <td className="trace-key">{k}</td>
+                        <td className="trace-val">{traceValue(v)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {traceState === "error" && (
+        <p className="trace-error">Không thể tải trace. Bạn có thể không có quyền hoặc đã có lỗi.</p>
+      )}
+    </div>
+  );
+}
+
 interface AssistantMsgProps {
   response: ChatResponse;
   time: string;
@@ -152,6 +287,12 @@ function AssistantMsg({ response, time, onComposerFill }: AssistantMsgProps) {
         {response.sources && response.sources.length > 0 && (
           <SourcePanel sources={response.sources} />
         )}
+
+        {/* Sprint 1: Version metadata badges + trace panel */}
+        <VersionBadges
+          messageId={response.message_id}
+          metadata={response.metadata as unknown as Record<string, unknown>}
+        />
 
         <div className="message-footer">
           <div className="meta-row">
@@ -209,11 +350,12 @@ function RecordMsg({ record, sources, onComposerFill }: RecordMsgProps) {
       },
       suggested_questions: [],
       metadata: {
+        ...record.metadata,
         engine: (record.metadata?.engine as string) ?? "—",
         query_mode: (record.metadata?.query_mode as string) ?? "—",
         execution_time_ms: (record.metadata?.execution_time_ms as number) ?? 0,
         source_count: (record.metadata?.source_count as number) ?? 0,
-        cypher: null,
+        cypher: (record.metadata?.cypher as string | null | undefined) ?? null,
       },
       feedback: record.feedback ?? null,
     };

@@ -138,10 +138,11 @@ async def rate_limit_middleware(request: Request, call_next):
 
 
 # ── Include Routers ───────────────────────────────────────────────────────
-from app.routers import admin, conversations, feedback, health, knowledge, me, query, schema  # noqa: E402
+from app.routers import admin, conversations, feedback, health, knowledge, me, messages, query, schema  # noqa: E402
 
 app.include_router(me.router)
 app.include_router(conversations.router)
+app.include_router(messages.router)
 app.include_router(feedback.router)
 app.include_router(knowledge.router)
 app.include_router(admin.router)

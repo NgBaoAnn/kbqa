@@ -25,9 +25,12 @@ from app.models.contracts import (
     ConversationSummary,
     MessageCreateRequest,
     MessageRecord,
+    MessageTraceResponse,
     SafetyPayload,
+    VersionMetadata,
 )
 from app.services import ai_service  # module-level so tests can patch it
+from app.services import versioning_service
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +131,7 @@ def _persist_query_log(
 
     Must be called within an active ``db.transaction()`` block so that the log
     row is committed or rolled back together with the assistant message.
+    Now includes Sprint 1 version metadata in the log row's metadata JSONB.
     """
     meta = ai_result.metadata
     raw = ai_result.raw_engine_metadata
@@ -140,6 +144,9 @@ def _persist_query_log(
     }
     if raw.get("error_code"):
         log_meta["error_code"] = raw["error_code"]
+
+    # Sprint 1: merge version metadata into query log
+    log_meta.update(versioning_service.get_version_metadata())
 
     db.execute_in_tx(
         conn,
@@ -318,6 +325,13 @@ async def create_message(
     data_json = json.dumps(ai_result.data)  # json.dumps(None) → "null", valid JSONB
     with db.transaction() as conn:
         # Step 4: Persist assistant message
+        # Sprint 1: merge version metadata into the message metadata JSONB
+        version_meta = versioning_service.get_version_metadata()
+        msg_metadata: dict[str, Any] = {
+            **ai_result.metadata.model_dump(),
+            **version_meta,
+        }
+
         assistant_row = db.fetch_one_in_tx(
             conn,
             f"""
@@ -339,7 +353,7 @@ async def create_message(
                 ai_result.response_type,
                 data_json,
                 ai_result.safety.model_dump_json(),
-                ai_result.metadata.model_dump_json(),
+                json.dumps(msg_metadata),
             ),
         )
         if assistant_row is None:
@@ -371,5 +385,79 @@ async def create_message(
         sources=ai_result.sources,
         safety=ai_result.safety,
         suggested_questions=ai_result.suggested_questions,
-        metadata=ai_result.metadata,
+        metadata=ChatMetadata(**msg_metadata),
+    )
+
+
+async def get_message_trace(
+    *,
+    message_id: str,
+    requester_user_id: str,
+    requester_role: str,
+    database: SupabaseDatabase | None = None,
+) -> MessageTraceResponse:
+    """Return trace information for a single assistant message.
+
+    Authorization rules:
+    - The owner of the conversation that contains the message may access the trace.
+    - Any user with role ``reviewer`` or ``admin`` may access any trace.
+
+    Raises HTTP 404 if the message does not exist.
+    Raises HTTP 403 if the requester is not the owner and not a reviewer/admin.
+    """
+    db = database or get_database()
+
+    row = db.fetch_one(
+        """
+        select
+            m.id::text as id,
+            m.metadata,
+            c.user_id::text as owner_id
+        from public.messages m
+        join public.conversations c on c.id = m.conversation_id
+        where m.id = %s
+          and m.role = 'assistant'
+        """,
+        (message_id,),
+    )
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "MESSAGE_NOT_FOUND",
+                "message": "Message was not found or is not an assistant message.",
+            },
+        )
+
+    # Authorization: owner OR reviewer/admin
+    is_owner = row["owner_id"] == requester_user_id
+    is_privileged = requester_role in ("reviewer", "admin")
+    if not is_owner and not is_privileged:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": "TRACE_ACCESS_DENIED",
+                "message": "You do not have permission to view this message trace.",
+            },
+        )
+
+    metadata: dict[str, Any] = row.get("metadata") or {}
+
+    # Extract version fields, falling back to empty strings if not persisted yet
+    version_meta = VersionMetadata(
+        prompt_version=metadata.get("prompt_version", ""),
+        model_name=metadata.get("model_name", ""),
+        kg_version=metadata.get("kg_version", ""),
+        pipeline_version=metadata.get("pipeline_version", ""),
+    )
+
+    # Engine metadata: everything except the version keys
+    version_keys = {"prompt_version", "model_name", "kg_version", "pipeline_version"}
+    engine_meta = {k: v for k, v in metadata.items() if k not in version_keys}
+
+    return MessageTraceResponse(
+        message_id=message_id,
+        version_metadata=version_meta,
+        engine_metadata=engine_meta,
     )

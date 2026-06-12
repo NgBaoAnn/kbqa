@@ -17,7 +17,7 @@ export interface ApiError {
 export interface CurrentUserResponse {
   id: string;
   email: string | null;
-  role: "user" | "admin";
+  role: "user" | "reviewer" | "admin";
   display_name: string | null;
   is_active: boolean;
   auth_provider: "supabase";
@@ -84,6 +84,10 @@ export interface ChatMetadata {
   execution_time_ms: number;
   source_count: number;
   cypher?: string | null;
+  prompt_version?: string | null;
+  model_name?: string | null;
+  kg_version?: string | null;
+  pipeline_version?: string | null;
 }
 
 export interface ChatResponse {
@@ -232,4 +236,32 @@ export interface ReviewQueueResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+// ── Sprint 1: Versioning + Preferences ────────────────────────────────
+
+export interface VersionMetadata {
+  prompt_version: string;
+  model_name: string;
+  kg_version: string;
+  pipeline_version: string;
+}
+
+export interface UserPreferences {
+  language: "vi" | "en";
+  explanation_level: "general" | "detailed" | "expert";
+  answer_style: "concise" | "detailed";
+}
+
+export interface UserPreferencesResponse extends UserPreferences {
+  id: string;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MessageTraceResponse {
+  message_id: string;
+  version_metadata: VersionMetadata;
+  engine_metadata: Record<string, unknown>;
 }

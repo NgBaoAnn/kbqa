@@ -32,7 +32,7 @@ ChatSourceType = Literal[
 class CurrentUserResponse(BaseModel):
     id: str
     email: str | None = None
-    role: Literal["user", "admin"] = "user"
+    role: Literal["user", "reviewer", "admin"] = "user"
     display_name: str | None = None
     is_active: bool = True
     auth_provider: Literal["supabase"] = "supabase"
@@ -179,6 +179,10 @@ class ChatMetadata(BaseModel):
     execution_time_ms: float
     source_count: int
     cypher: str | None = None
+    prompt_version: str | None = None
+    model_name: str | None = None
+    kg_version: str | None = None
+    pipeline_version: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -431,6 +435,104 @@ class ReviewQueueResponse(BaseModel):
                 "total": 1,
                 "limit": 20,
                 "offset": 0,
+            }
+        }
+    )
+
+
+# ── Sprint 1: Versioning + Preferences ──────────────────────────────────
+
+
+class VersionMetadata(BaseModel):
+    """Version snapshot persisted with every assistant message and query log."""
+
+    prompt_version: str
+    model_name: str
+    kg_version: str
+    pipeline_version: str
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "prompt_version": "v1.0.0",
+                "model_name": "llama3:8b-instruct-q4_0",
+                "kg_version": "v1.0.0",
+                "pipeline_version": "v1.0.0",
+            }
+        }
+    )
+
+
+class UserPreferences(BaseModel):
+    """User personalisation settings."""
+
+    language: Literal["vi", "en"] = "vi"
+    explanation_level: Literal["general", "detailed", "expert"] = "general"
+    answer_style: Literal["concise", "detailed"] = "concise"
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "language": "vi",
+                "explanation_level": "general",
+                "answer_style": "concise",
+            }
+        }
+    )
+
+
+class UserPreferencesResponse(BaseModel):
+    """Full preferences row returned from GET/PATCH /api/v1/me/preferences."""
+
+    id: str
+    user_id: str
+    language: Literal["vi", "en"]
+    explanation_level: Literal["general", "detailed", "expert"]
+    answer_style: Literal["concise", "detailed"]
+    created_at: str
+    updated_at: str
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+                "user_id": "0b3fb8c2-88b4-41b9-8a70-5bd0fb0dd6a1",
+                "language": "vi",
+                "explanation_level": "general",
+                "answer_style": "concise",
+                "created_at": "2026-06-12T00:00:00Z",
+                "updated_at": "2026-06-12T00:00:00Z",
+            }
+        }
+    )
+
+
+class MessageTraceResponse(BaseModel):
+    """Trace information for a single assistant message.
+
+    Accessible by the message owner, any reviewer, or any admin.
+    """
+
+    message_id: str
+    version_metadata: VersionMetadata
+    engine_metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "message_id": "c3d038c1-f6c9-4c82-9795-ecdf066e2f9d",
+                "version_metadata": {
+                    "prompt_version": "v1.0.0",
+                    "model_name": "llama3:8b-instruct-q4_0",
+                    "kg_version": "v1.0.0",
+                    "pipeline_version": "v1.0.0",
+                },
+                "engine_metadata": {
+                    "engine": "cypher_direct",
+                    "query_mode": "cypher:template:symptoms",
+                    "execution_time_ms": 120,
+                    "source_count": 1,
+                },
             }
         }
     )
