@@ -23,9 +23,12 @@ import type {
   FeedbackResponse,
   HealthResponse,
   MessageCreateRequest,
+  MessageTraceResponse,
   QueryRequest,
   QueryResponse,
   ReviewQueueResponse,
+  UserPreferences,
+  UserPreferencesResponse,
 } from "../types/api";
 
 const API_BASE_URL =
@@ -211,3 +214,28 @@ export async function getReviewQueue(
   return request<ReviewQueueResponse>(`/api/v1/admin/review-items?${params}`);
 }
 
+// ── Sprint 1: Preferences ─────────────────────────────────────────────────────
+
+/** GET /api/v1/me/preferences — requires authentication */
+export async function getPreferences(): Promise<UserPreferencesResponse> {
+  return request<UserPreferencesResponse>("/api/v1/me/preferences");
+}
+
+/** PATCH /api/v1/me/preferences — partial update */
+export async function updatePreferences(
+  patch: Partial<UserPreferences>,
+): Promise<UserPreferencesResponse> {
+  return request<UserPreferencesResponse>("/api/v1/me/preferences", {
+    method: "PATCH",
+    body: patch,
+  });
+}
+
+// ── Sprint 1: Message trace ───────────────────────────────────────────────────
+
+/** GET /api/v1/messages/:id/trace — owner / reviewer / admin */
+export async function getMessageTrace(messageId: string): Promise<import("../types/api").MessageTraceResponse> {
+  return request<import("../types/api").MessageTraceResponse>(
+    `/api/v1/messages/${messageId}/trace`,
+  );
+}

@@ -16,25 +16,18 @@
  *  - view state: "chat" | "knowledge" | "admin"
  */
 
-import { useState, useEffect, useRef } from "react";
-import {
-  BookOpen,
-  Menu,
-  Moon,
-  Plus,
-  ShieldAlert,
-  ShieldCheck,
-  Sun,
-  X,
-} from "lucide-react";
+import { BookOpen, ClipboardList, Menu, Moon, Plus, Settings, ShieldAlert, ShieldCheck, Sun, X } from "lucide-react";
 import { useAuth } from "../features/auth/AuthContext";
 import { ConversationSidebar } from "../features/chat/ConversationSidebar";
 import { ChatPanel } from "../features/chat/ChatPanel";
 import { KnowledgeExplorer } from "../features/knowledge/KnowledgeExplorer";
 import { AdminDashboard } from "../features/admin/AdminDashboard";
+import { SettingsScreen } from "../features/settings/SettingsScreen";
 import type { ConversationSummary } from "../types/api";
 
-type AppView = "chat" | "knowledge" | "admin";
+import { useState, useEffect, useRef } from "react";
+
+type AppView = "chat" | "knowledge" | "admin" | "settings" | "reviewer";
 
 function WelcomePane() {
   return (
@@ -119,14 +112,29 @@ export function AppShell() {
     .toUpperCase();
 
   const isAdmin = user?.role === "admin";
+  const isReviewerOrAdmin = user?.role === "reviewer" || user?.role === "admin";
+
+  // Role label for sidebar footer
+  function roleLabel() {
+    if (user?.role === "admin") return "Quản trị viên";
+    if (user?.role === "reviewer") return "Reviewer";
+    return "Người dùng";
+  }
 
   // Main content renderer
   function renderMain() {
+    if (view === "settings") {
+      return <SettingsScreen />;
+    }
     if (view === "knowledge") {
       return <KnowledgeExplorer />;
     }
     if (view === "admin" && isAdmin) {
       return <AdminDashboard />;
+    }
+    if (view === "reviewer" && isReviewerOrAdmin) {
+      // Sprint 4 will add a full ReviewerDashboard; for now fallback to AdminDashboard for admin
+      return isAdmin ? <AdminDashboard /> : <div className="welcome-pane"><p>Reviewer dashboard — Sprint 4.</p></div>;
     }
     // Default: chat view
     if (activeConversation) {
@@ -210,7 +218,7 @@ export function AppShell() {
             newChatTrigger={newChatTrigger}
           />
 
-          {/* ── Nav links (Sprint 3) ── */}
+          {/* ── Nav links (Sprint 1+) ── */}
           <nav className="sidebar-nav" aria-label="Tính năng">
             <div className="sidebar-section-label">Tính năng</div>
             <button
@@ -224,6 +232,33 @@ export function AppShell() {
               Tra cứu bệnh
             </button>
 
+            {/* Settings — visible to all roles */}
+            <button
+              id="nav-settings-btn"
+              type="button"
+              className={`nav-item${view === "settings" ? " nav-item--active" : ""}`}
+              onClick={() => navigateTo("settings")}
+              aria-current={view === "settings" ? "page" : undefined}
+            >
+              <Settings size={15} className="nav-item-icon" />
+              Cài đặt
+            </button>
+
+            {/* Reviewer dashboard — reviewer + admin */}
+            {isReviewerOrAdmin && (
+              <button
+                id="nav-reviewer-btn"
+                type="button"
+                className={`nav-item${view === "reviewer" ? " nav-item--active" : ""}`}
+                onClick={() => navigateTo("reviewer")}
+                aria-current={view === "reviewer" ? "page" : undefined}
+              >
+                <ClipboardList size={15} className="nav-item-icon" />
+                Review Queue
+              </button>
+            )}
+
+            {/* Admin dashboard — admin only */}
             {isAdmin && (
               <button
                 id="nav-admin-btn"
@@ -249,7 +284,7 @@ export function AppShell() {
                   {user?.display_name ?? user?.email ?? "—"}
                 </div>
                 <div className="sidebar-user-role">
-                  {user?.role === "admin" ? "Quản trị viên" : "Người dùng"}
+                  {roleLabel()}
                 </div>
               </div>
               <button
