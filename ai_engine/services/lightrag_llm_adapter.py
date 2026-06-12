@@ -1,6 +1,7 @@
 """LightRAG LLM adapter — wrapper functions conforming to LightRAG's expected signatures."""
 
 import logging
+from collections.abc import AsyncIterator
 from typing import Any
 
 import numpy as np
@@ -25,7 +26,7 @@ async def llm_model_func(
     history_messages: list[dict[str, str]] | None = None,
     keyword_extraction: bool = False,
     **kwargs: Any,
-) -> str:
+) -> str | AsyncIterator[str]:
     client = _get_llm_client()
 
     messages: list[dict[str, str]] = []
@@ -49,8 +50,29 @@ async def llm_model_func(
     # keyword_extraction needs ~256 tokens, synthesis ~512 is sufficient.
     _default = 256 if keyword_extraction else 512
     max_tokens = int(kwargs.get("max_new_tokens", _default))
+    stream = bool(kwargs.get("stream")) and not keyword_extraction
 
     try:
+        if stream:
+            response = await client.chat.completions.create(
+                model=LLM_MODEL_NAME,
+                messages=messages,
+                temperature=0.3,
+                max_tokens=max_tokens,
+                stream=True,
+            )
+
+            async def _stream_chunks() -> AsyncIterator[str]:
+                async for chunk in response:
+                    if not getattr(chunk, "choices", None):
+                        continue
+                    delta = getattr(chunk.choices[0], "delta", None)
+                    content = getattr(delta, "content", None) if delta else None
+                    if content:
+                        yield content
+
+            return _stream_chunks()
+
         response = await client.chat.completions.create(
             model=LLM_MODEL_NAME,
             messages=messages,
