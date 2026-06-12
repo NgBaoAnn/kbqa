@@ -79,6 +79,8 @@ def _make_ai_result(
     response_type: str = "text",
     sources: list[ChatSource] | None = None,
     safety_level: str = "normal",
+    data: list[dict[str, Any]] | dict[str, Any] | None = None,
+    suggested_questions: list[str] | None = None,
 ) -> AIServiceResult:
     if sources is None:
         sources = [
@@ -94,14 +96,14 @@ def _make_ai_result(
     return AIServiceResult(
         answer=answer,
         response_type=response_type,
-        data=None,
+        data=data,
         sources=sources,
         safety=SafetyPayload(
             level=safety_level,
             requires_emergency_notice=safety_level == "emergency",
             disclaimer="Thông tin chỉ mang tính chất tham khảo.",
         ),
-        suggested_questions=[],
+        suggested_questions=suggested_questions or [],
         metadata=ChatMetadata(
             engine=engine,
             query_mode=query_mode,
@@ -134,6 +136,7 @@ class FakeDatabase:
         self.feedback_rows: list[dict] = []
         self.review_items: list[dict] = []
         self.query_logs: list[dict] = []
+        self.preferences: dict[str, dict] = {}
         self.executed: list[tuple] = []
         self.now = "2026-06-11T00:00:00+00:00"
 
@@ -213,6 +216,29 @@ class FakeDatabase:
         if "insert into public.messages" in q:
             return self._insert_message(q, params)
 
+        # user_preferences select / insert used by chat_service
+        if (
+            "from public.user_preferences" in q
+            and "insert into public.user_preferences" not in q
+            and "update public.user_preferences" not in q
+        ):
+            user_id = params[0]
+            return self.preferences.get(user_id)
+
+        if "insert into public.user_preferences" in q:
+            user_id, language, explanation_level, answer_style = params
+            row = {
+                "id": str(uuid4()),
+                "user_id": user_id,
+                "language": language,
+                "explanation_level": explanation_level,
+                "answer_style": answer_style,
+                "created_at": self.now,
+                "updated_at": self.now,
+            }
+            self.preferences[user_id] = row
+            return row
+
         # These inserts are handled in execute() — fetch_one should not see them.
         # Fall through to None for any unmatched query.
 
@@ -278,8 +304,8 @@ class FakeDatabase:
                 if r["user_id"] == uid
             ]
 
-        if "from public.messages" in q and "join" not in q:
-            cid = params[0]
+        if "from public.messages" in q and "join public.conversations" not in q:
+            cid = params[1] if len(params) > 1 else params[0]
             return [
                 {k: v for k, v in m.items() if k != "conversation_id"}
                 for m in self.messages
@@ -316,6 +342,28 @@ class FakeDatabase:
                 "status": qstatus,
                 "metadata": json.loads(meta_json),
             })
+
+    class _FakeTx:
+        pass
+
+    def transaction(self):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _ctx():
+            yield self._FakeTx()
+
+        return _ctx()
+
+    def fetch_one_in_tx(self, _conn, query: str, params: tuple = ()) -> dict | None:
+        return self.fetch_one(query, params)
+
+    def execute_in_tx(self, _conn, query: str, params: tuple = ()) -> None:
+        return self.execute(query, params)
+
+    def execute_many_in_tx(self, _conn, query: str, rows) -> None:
+        for row in rows:
+            self.execute(query, row)
 
     # ── Private helpers ─────────────────────────────────────────────────
 
@@ -534,6 +582,119 @@ class TestCreateMessageRealAI:
             json={"question": "Q?"},
         )
         assert response.status_code == 404
+
+
+class TestSprint2ChatIntelligence:
+    def test_suggested_questions_returned_and_persisted_in_metadata(self, api):
+        client, fake_db = api
+        fake_db.add_profile("user-1")
+        cid = fake_db.add_conversation("user-1")
+        ai_result = _make_ai_result(
+            suggested_questions=[
+                "Dấu hiệu cần đi khám là gì?",
+                "Cách phòng ngừa như thế nào?",
+                "Cần lưu ý gì khi chăm sóc?",
+            ],
+        )
+
+        with patch("app.services.chat_service.ai_service") as mock_svc:
+            mock_svc.answer_question = AsyncMock(return_value=ai_result)
+            response = client.post(
+                f"/api/v1/conversations/{cid}/messages",
+                headers=_auth_headers(),
+                json={"question": "Bệnh tiểu đường là gì?"},
+            )
+
+        body = response.json()
+        assert len(body["suggested_questions"]) == 3
+        assistant_msg = next(m for m in fake_db.messages if m["role"] == "assistant")
+        assert assistant_msg["metadata"]["suggested_questions"] == body["suggested_questions"]
+
+    def test_history_hydrates_suggested_questions_from_metadata(self, api):
+        client, fake_db = api
+        fake_db.add_profile("user-1")
+        cid = fake_db.add_conversation("user-1")
+        fake_db.add_message(cid, role="assistant", content="Câu trả lời.")
+        fake_db.messages[-1]["metadata"]["suggested_questions"] = ["Hỏi tiếp thế nào?"]
+
+        response = client.get(f"/api/v1/conversations/{cid}", headers=_auth_headers())
+
+        assert response.status_code == 200
+        assistant = next(m for m in response.json()["messages"] if m["role"] == "assistant")
+        assert assistant["suggested_questions"] == ["Hỏi tiếp thế nào?"]
+
+    def test_disambiguation_response_has_structured_data(self, api):
+        client, fake_db = api
+        fake_db.add_profile("user-1")
+        cid = fake_db.add_conversation("user-1")
+        options = [
+            {
+                "id": "disease-cum-a",
+                "label": "Bệnh cúm A",
+                "description": "Bệnh trong cơ sở tri thức VietMedKG.",
+                "entity_type": "Disease",
+                "confidence": 0.95,
+            }
+        ]
+        ai_result = _make_ai_result(
+            response_type="disambiguation",
+            answer="Vui lòng chọn bệnh bạn muốn hỏi.",
+            data=options,
+        )
+
+        with patch("app.services.chat_service.ai_service") as mock_svc:
+            mock_svc.answer_question = AsyncMock(return_value=ai_result)
+            response = client.post(
+                f"/api/v1/conversations/{cid}/messages",
+                headers=_auth_headers(),
+                json={"question": "Cúm có triệu chứng gì?"},
+            )
+
+        body = response.json()
+        assert body["response_type"] == "disambiguation"
+        assert body["data"] == options
+        assert set(body["data"][0]) == {"id", "label", "description", "entity_type", "confidence"}
+
+    def test_preferences_are_passed_to_ai_and_logged(self, api):
+        client, fake_db = api
+        fake_db.add_profile("user-1")
+        cid = fake_db.add_conversation("user-1")
+        fake_db.preferences["user-1"] = {
+            "id": "pref-1",
+            "user_id": "user-1",
+            "language": "vi",
+            "explanation_level": "expert",
+            "answer_style": "detailed",
+            "created_at": fake_db.now,
+            "updated_at": fake_db.now,
+        }
+        ai_result = _make_ai_result()
+        ai_result.metadata.language = "vi"
+        ai_result.metadata.explanation_level = "expert"
+        ai_result.metadata.answer_style = "detailed"
+        ai_result.raw_engine_metadata["preferences"] = {
+            "language": "vi",
+            "explanation_level": "expert",
+            "answer_style": "detailed",
+        }
+
+        with patch("app.services.chat_service.ai_service") as mock_svc:
+            mock_svc.answer_question = AsyncMock(return_value=ai_result)
+            response = client.post(
+                f"/api/v1/conversations/{cid}/messages",
+                headers=_auth_headers(),
+                json={"question": "Bệnh tiểu đường là gì?"},
+            )
+
+        mock_svc.answer_question.assert_awaited_once()
+        call_kwargs = mock_svc.answer_question.await_args.kwargs
+        assert call_kwargs["preferences"] == {
+            "language": "vi",
+            "explanation_level": "expert",
+            "answer_style": "detailed",
+        }
+        assert response.json()["metadata"]["explanation_level"] == "expert"
+        assert fake_db.query_logs[0]["metadata"]["preferences"]["answer_style"] == "detailed"
 
 
 # ════════════════════════════════════════════════════════════════════════════
