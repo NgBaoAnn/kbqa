@@ -63,6 +63,42 @@ class TestLLMClient:
             assert result == "Test response"
 
     @pytest.mark.asyncio
+    async def test_llm_model_func_streams_chunks(self):
+        """Streaming LLM calls should return an async iterator of content chunks."""
+        from ai_engine.services.lightrag_llm_adapter import llm_model_func
+
+        class AsyncChunks:
+            def __aiter__(self):
+                self._chunks = iter(["Xin ", "chào"])
+                return self
+
+            async def __anext__(self):
+                try:
+                    content = next(self._chunks)
+                except StopIteration as exc:
+                    raise StopAsyncIteration from exc
+                chunk = MagicMock()
+                chunk.choices = [MagicMock()]
+                chunk.choices[0].delta.content = content
+                return chunk
+
+        with patch("ai_engine.services.lightrag_llm_adapter._get_llm_client") as mock_client:
+            mock_instance = MagicMock()
+            mock_instance.chat = MagicMock()
+            mock_instance.chat.completions = MagicMock()
+            mock_instance.chat.completions.create = AsyncMock(return_value=AsyncChunks())
+            mock_client.return_value = mock_instance
+
+            result = await llm_model_func("test prompt", stream=True)
+            chunks = []
+            async for chunk in result:
+                chunks.append(chunk)
+
+            assert chunks == ["Xin ", "chào"]
+            mock_instance.chat.completions.create.assert_awaited_once()
+            assert mock_instance.chat.completions.create.await_args.kwargs["stream"] is True
+
+    @pytest.mark.asyncio
     async def test_embedding_func_returns_ndarray(self):
         """Embedding function should return numpy array with correct dimensions."""
         import numpy as np
