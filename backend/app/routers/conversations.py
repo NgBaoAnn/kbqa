@@ -1,6 +1,9 @@
 """Conversation API — create, list, retrieve conversations and send messages."""
 
-from fastapi import APIRouter, Body, Depends, Path
+from typing import Literal
+
+from fastapi import APIRouter, Body, Depends, Path, Query
+from fastapi.responses import Response, StreamingResponse
 
 from app.api_gateway.dependencies import CurrentUser, get_current_user
 from app.models.contracts import (
@@ -11,6 +14,8 @@ from app.models.contracts import (
     MessageCreateRequest,
 )
 from app.services import chat_service
+from app.services import export_service
+from app.services import streaming_service
 
 router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
 
@@ -73,3 +78,52 @@ async def create_message(
         payload=payload,
     )
 
+
+@router.post(
+    "/{conversation_id}/messages/stream",
+    summary="Stream Message To Conversation",
+    responses={404: {"description": "Conversation not found"}},
+)
+async def create_message_stream(
+    conversation_id: str = Path(..., description="Conversation UUID"),
+    payload: MessageCreateRequest = Body(...),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    return StreamingResponse(
+        streaming_service.stream_message_events(
+            user_id=current_user.id,
+            conversation_id=conversation_id,
+            payload=payload,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get(
+    "/{conversation_id}/export",
+    summary="Export Conversation",
+    responses={404: {"description": "Conversation not found"}},
+)
+async def export_conversation(
+    conversation_id: str = Path(..., description="Conversation UUID"),
+    export_format: Literal["markdown", "pdf"] = Query("markdown", alias="format"),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    exported = await export_service.export_conversation(
+        user_id=current_user.id,
+        conversation_id=conversation_id,
+        export_format=export_format,
+    )
+    return Response(
+        content=exported.content,
+        media_type=exported.media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{exported.filename}"',
+            "Cache-Control": "no-store",
+        },
+    )

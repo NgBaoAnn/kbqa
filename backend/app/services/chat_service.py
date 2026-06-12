@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -34,6 +35,7 @@ from app.services import preference_service
 from app.services import versioning_service
 
 logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[str, str], Awaitable[None] | None]
 
 # ── Column projections ─────────────────────────────────────────────────────
 
@@ -182,6 +184,120 @@ def _persist_query_log(
     )
 
 
+def ensure_conversation_owner(
+    *,
+    db: SupabaseDatabase,
+    user_id: str,
+    conversation_id: str,
+) -> None:
+    conversation = db.fetch_one(
+        "select id::text as id from public.conversations where id = %s and user_id = %s",
+        (conversation_id, user_id),
+    )
+    if conversation is None:
+        raise _not_found()
+
+
+def persist_user_message(
+    *,
+    db: SupabaseDatabase,
+    conversation_id: str,
+    payload: MessageCreateRequest,
+) -> None:
+    db.fetch_one(
+        f"""
+        insert into public.messages (conversation_id, role, content, metadata)
+        values (%s, 'user', %s, %s::jsonb)
+        returning {MESSAGE_COLUMNS}
+        """,
+        (
+            conversation_id,
+            payload.question,
+            json.dumps({"mode": payload.mode, "source": "api"}),
+        ),
+    )
+
+
+def persist_assistant_response(
+    *,
+    db: SupabaseDatabase,
+    conversation_id: str,
+    question: str,
+    ai_result: AIServiceResult,
+    ai_called: bool = True,
+) -> ChatResponse:
+    data_json = json.dumps(ai_result.data)
+    with db.transaction() as conn:
+        version_meta = versioning_service.get_version_metadata()
+        msg_metadata: dict[str, Any] = {
+            **ai_result.metadata.model_dump(),
+            **version_meta,
+            "original_question": question,
+            "suggested_questions": ai_result.suggested_questions,
+        }
+
+        assistant_row = db.fetch_one_in_tx(
+            conn,
+            f"""
+            insert into public.messages (
+                conversation_id,
+                role,
+                content,
+                response_type,
+                data,
+                safety,
+                metadata
+            )
+            values (%s, 'assistant', %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
+            returning {MESSAGE_COLUMNS}
+            """,
+            (
+                conversation_id,
+                ai_result.answer,
+                ai_result.response_type,
+                data_json,
+                ai_result.safety.model_dump_json(),
+                json.dumps(msg_metadata),
+            ),
+        )
+        if assistant_row is None:
+            raise RuntimeError("Failed to persist assistant message.")
+
+        assistant_message_id = assistant_row["id"]
+        _persist_message_sources(db, conn, assistant_message_id, ai_result)
+        _persist_query_log(db, conn, assistant_message_id, ai_result, ai_called=ai_called)
+        db.execute_in_tx(
+            conn,
+            "update public.conversations set updated_at = timezone('utc', now()) where id = %s",
+            (conversation_id,),
+        )
+
+    return ChatResponse(
+        conversation_id=conversation_id,
+        message_id=assistant_message_id,
+        status="success",
+        response_type=ai_result.response_type,
+        answer=ai_result.answer,
+        data=ai_result.data,
+        sources=ai_result.sources,
+        safety=ai_result.safety,
+        suggested_questions=ai_result.suggested_questions,
+        metadata=ChatMetadata(**msg_metadata),
+    )
+
+
+async def _notify_progress(
+    progress: ProgressCallback | None,
+    stage: str,
+    message: str,
+) -> None:
+    if progress is None:
+        return
+    result = progress(stage, message)
+    if result is not None:
+        await result
+
+
 # ── Public service functions ───────────────────────────────────────────────
 
 
@@ -276,6 +392,7 @@ async def create_message(
     payload: MessageCreateRequest,
     database: SupabaseDatabase | None = None,
     ai_service_module=None,  # injectable for testing
+    progress: ProgressCallback | None = None,
 ) -> ChatResponse:
     """Handle a user question: call AI, persist messages, sources and query log.
 
@@ -295,32 +412,19 @@ async def create_message(
     db = database or get_database()
 
     # ── Step 1: Verify ownership ───────────────────────────────────────────
-    conversation = db.fetch_one(
-        "select id::text as id from public.conversations where id = %s and user_id = %s",
-        (conversation_id, user_id),
-    )
-    if conversation is None:
-        raise _not_found()
+    await _notify_progress(progress, "routing", "Đang kiểm tra hội thoại và quyền truy cập.")
+    ensure_conversation_owner(db=db, user_id=user_id, conversation_id=conversation_id)
 
     # ── Step 2: Persist user message ──────────────────────────────────────
-    db.fetch_one(
-        f"""
-        insert into public.messages (conversation_id, role, content, metadata)
-        values (%s, 'user', %s, %s::jsonb)
-        returning {MESSAGE_COLUMNS}
-        """,
-        (
-            conversation_id,
-            payload.question,
-            json.dumps({"mode": payload.mode, "source": "api"}),
-        ),
-    )
+    persist_user_message(db=db, conversation_id=conversation_id, payload=payload)
 
     # ── Step 3: Call AI service ───────────────────────────────────────────
     # ai_service_module allows tests to inject a mock without patching the global
     # import. Production code uses the module-level `ai_service` (patchable).
     _ai = ai_service_module if ai_service_module is not None else ai_service
+    await _notify_progress(progress, "retrieving", "Đang tải tuỳ chọn và truy xuất ngữ cảnh.")
     preferences = await preference_service.get_preferences(user_id, database=db)
+    await _notify_progress(progress, "generating", "Đang tạo câu trả lời.")
     ai_result: AIServiceResult = await _ai.answer_question(
         question=payload.question,
         mode=payload.mode,
@@ -333,75 +437,13 @@ async def create_message(
     )
 
     # ── Step 4-7: Atomic persist of AI result ─────────────────────────────
-    # All writes after AI call are wrapped in a single transaction so that
-    # if any step fails, the DB is left in a consistent state (no orphaned
-    # assistant messages without sources/query_logs).
-    data_json = json.dumps(ai_result.data)  # json.dumps(None) → "null", valid JSONB
-    with db.transaction() as conn:
-        # Step 4: Persist assistant message
-        # Sprint 1: merge version metadata into the message metadata JSONB
-        version_meta = versioning_service.get_version_metadata()
-        msg_metadata: dict[str, Any] = {
-            **ai_result.metadata.model_dump(),
-            **version_meta,
-            "original_question": payload.question,
-            "suggested_questions": ai_result.suggested_questions,
-        }
-
-        assistant_row = db.fetch_one_in_tx(
-            conn,
-            f"""
-            insert into public.messages (
-                conversation_id,
-                role,
-                content,
-                response_type,
-                data,
-                safety,
-                metadata
-            )
-            values (%s, 'assistant', %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
-            returning {MESSAGE_COLUMNS}
-            """,
-            (
-                conversation_id,
-                ai_result.answer,
-                ai_result.response_type,
-                data_json,
-                ai_result.safety.model_dump_json(),
-                json.dumps(msg_metadata),
-            ),
-        )
-        if assistant_row is None:
-            raise RuntimeError("Failed to persist assistant message.")
-
-        assistant_message_id = assistant_row["id"]
-
-        # Step 5: Persist message_sources
-        _persist_message_sources(db, conn, assistant_message_id, ai_result)
-
-        # Step 6: Persist query_log
-        _persist_query_log(db, conn, assistant_message_id, ai_result, ai_called=True)
-
-        # Step 7: Update conversation timestamp
-        db.execute_in_tx(
-            conn,
-            "update public.conversations set updated_at = timezone('utc', now()) where id = %s",
-            (conversation_id,),
-        )
-
-    # ── Step 8: Build and return ChatResponse ─────────────────────────────
-    return ChatResponse(
+    await _notify_progress(progress, "persisting", "Đang lưu câu trả lời và nguồn trích dẫn.")
+    return persist_assistant_response(
+        db=db,
         conversation_id=conversation_id,
-        message_id=assistant_message_id,
-        status="success",
-        response_type=ai_result.response_type,
-        answer=ai_result.answer,
-        data=ai_result.data,
-        sources=ai_result.sources,
-        safety=ai_result.safety,
-        suggested_questions=ai_result.suggested_questions,
-        metadata=ChatMetadata(**msg_metadata),
+        question=payload.question,
+        ai_result=ai_result,
+        ai_called=True,
     )
 
 
