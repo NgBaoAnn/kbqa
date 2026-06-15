@@ -43,12 +43,12 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["ai_engine*", "backend*"]
+include = ["src*", "ai_engine*", "backend*", "data_pipeline*"]
 
 [tool.pytest.ini_options]
-testpaths = ["ai_engine/tests", "backend/tests"]
+testpaths = ["tests", "ai_engine/tests", "backend/tests"]
 asyncio_mode = "auto"
-pythonpath = [".", "backend"]
+pythonpath = [".", "backend", "src"]
 
 [tool.ruff]
 line-length = 100
@@ -57,3 +57,8 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N"]
 ignore = ["E501"]
+
+# Clean Architecture: domain and ports must not import from adapters or api
+[tool.ruff.lint.per-file-ignores]
+"src/domain/**" = []
+"src/ports/**" = []
