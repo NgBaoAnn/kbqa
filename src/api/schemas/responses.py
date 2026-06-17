@@ -130,11 +130,12 @@ class ChatMetadata(BaseModel):
     answer_style: Literal["concise", "detailed"] | None = None
     original_question: str | None = None
     suggested_questions: list[str] = Field(default_factory=list)
+    persisted: bool = True
 
 
 class ChatResponse(BaseModel):
-    conversation_id: str
-    message_id: str
+    conversation_id: str | None
+    message_id: str | None
     status: Literal["success", "error"] = "success"
     response_type: str
     answer: str
@@ -272,6 +273,24 @@ class DiseaseDetailResponse(BaseModel):
             }
         }
     )
+
+
+# ── Health ────────────────────────────────────────────────────────────────
+
+class ServiceStatus(BaseModel):
+    api: str = "running"
+    supabase_postgres: str = "unknown"
+    neo4j: str = "unknown"
+    ai_engine: str = "unknown"
+    llm_server: str = "unknown"
+    embedding_server: str = "unknown"
+    lightrag: str = "unknown"
+
+
+class HealthResponse(BaseModel):
+    status: str
+    services: ServiceStatus
+    version: str
 
 
 # ── Admin ──────────────────────────────────────────────────────────────────

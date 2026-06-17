@@ -66,6 +66,7 @@ class StreamFinalPayload(BaseModel):
     status: Literal["success", "error"] = "success"
     response_type: str
     answer: str
+    data: list[dict[str, Any]] | dict[str, Any] | None = None
     sources: list[dict[str, Any]]
     safety: dict[str, Any]
     suggested_questions: list[str]
