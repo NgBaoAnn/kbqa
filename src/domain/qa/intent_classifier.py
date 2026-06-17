@@ -291,6 +291,19 @@ def classify_cypher_intent(question: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+# ── Class-based wrapper for use by QAPipeline ────────────────────────────
+
+class IntentClassifier:
+    """Thin class wrapper around regex-based intent classification.
+
+    Allows QAPipeline to use dependency-injected or subclassed classifiers.
+    """
+
+    def classify(self, question: str) -> tuple[str | None, str | None]:
+        """Classify question → (query_type, entity) using regex patterns."""
+        return classify_cypher_intent(question)
+
+
 # ── Emergency & list intent detection ─────────────────────────────────────
 
 EMERGENCY_PATTERNS_VI = [
