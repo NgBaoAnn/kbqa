@@ -20,6 +20,7 @@ from use_cases.answer_question import AIServiceResult, AnswerQuestionUseCase
 from domain.qa.pipeline import (
     QAPipeline, MSG_TIMEOUT, MSG_SYSTEM_ERROR, ENGINE_LIGHTRAG,
 )
+from domain.qa.response_formatter import format_lightrag_response
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +47,16 @@ class AnswerQuestionStreamUseCase:
         graph,
         vector,
         llm,
+        intent_extractor=None,
+        cypher_engine=None,
         disable_cypher_path: bool = False,
         default_lightrag_mode: str = "naive",
     ) -> None:
         self._graph = graph
         self._vector = vector
         self._llm = llm
+        self._intent_extractor = intent_extractor
+        self._cypher_engine = cypher_engine
         self._disable_cypher = disable_cypher_path
         self._default_mode = default_lightrag_mode
 
@@ -94,54 +99,28 @@ class AnswerQuestionStreamUseCase:
         start: float,
     ) -> AIServiceResult:
         """Internal: run with LightRAG native streaming on the LightRAG path."""
-        from domain.qa.safety_policy import safety_from_response_type
-        from domain.qa.source_policy import normalize_sources_from_pipeline
-
-        # If not forcing LightRAG, first do routing via non-streaming pipeline
-        # to determine the path. Cypher path doesn't stream.
         pipeline = QAPipeline(
             graph=self._graph,
             vector=self._vector,
             llm=self._llm,
+            intent_extractor=self._intent_extractor,
+            cypher_engine=self._cypher_engine,
             disable_cypher_path=self._disable_cypher,
             default_lightrag_mode=self._default_mode,
         )
 
-        if self._disable_cypher or mode:
-            # Directly use streaming LightRAG path
+        decision = await pipeline.route_question(question, mode=mode)
+        if decision.path == "lightrag":
             return await self._stream_lightrag(
-                question, mode or self._default_mode, on_delta, start, preferences
+                question,
+                decision.mode or mode or self._default_mode,
+                on_delta,
+                start,
+                preferences,
             )
 
-        # Run routing to check if we should go Cypher or LightRAG
-        # We do this by running the non-streaming pipeline but with a streaming
-        # LightRAG executor substituted in. For simplicity, we check intent
-        # first, then branch:
-        try:
-            from ai_engine.services.query_router import extract_intent_with_llm
-            query_type, entity = await extract_intent_with_llm(question)
-        except Exception:
-            query_type, entity = None, None
-
-        if entity is None:
-            qt, entity = pipeline._classifier.classify(question)
-            if qt:
-                query_type = qt
-
-        # Disambiguate
-        if entity:
-            canonical, variants = await pipeline._disambiguate(entity)
-            if variants and canonical:
-                # Cypher path — no streaming, run normally
-                result = await pipeline._cypher_path(question, canonical, query_type, start, exact=True)
-                return self._normalize(result, question, preferences, start)
-            elif not variants:
-                pass  # fall through to LightRAG
-
-        # LightRAG streaming path
-        return await self._stream_lightrag(
-            question, mode or self._default_mode, on_delta, start, preferences
-        )
+        result = await pipeline.execute_route(question, decision, start)
+        return self._normalize(result, question, preferences, start)
 
     async def _stream_lightrag(
         self,
@@ -158,6 +137,7 @@ class AnswerQuestionStreamUseCase:
         logger.info("LightRAG streaming path: mode=%s", mode)
         try:
             effective_mode, chunks = await self._vector.query_stream(question, mode=mode)
+            retrieval_context = getattr(chunks, "retrieval_context", {}) or {}
             answer_parts: list[str] = []
             async for chunk in chunks:
                 text = str(chunk)
@@ -177,14 +157,24 @@ class AnswerQuestionStreamUseCase:
             return self._error_result(elapsed_ms, mode, error_code=code)
 
         elapsed_ms = (time.monotonic() - start) * 1000
-        answer = "".join(answer_parts).strip()
+        raw_answer = "".join(answer_parts).strip()
+        formatted = format_lightrag_response(
+            raw_answer=raw_answer,
+            question=question,
+            query_mode=effective_mode,
+            execution_time_ms=elapsed_ms,
+        )
+        answer = formatted["answer"]
 
         meta = {
+            **(formatted.get("metadata") or {}),
             "engine": ENGINE_LIGHTRAG,
             "query_mode": effective_mode,
             "execution_time_ms": round(elapsed_ms, 1),
-            "source_count": 0,
         }
+        for key in ("entities", "relationships", "chunks"):
+            if retrieval_context.get(key):
+                meta[key] = retrieval_context[key]
         if preferences:
             meta.update({
                 "language": preferences.get("language"),
@@ -192,7 +182,7 @@ class AnswerQuestionStreamUseCase:
                 "answer_style": preferences.get("answer_style"),
             })
 
-        safety_vo = safety_from_response_type("text", question)
+        safety_vo = safety_from_response_type(formatted["response_type"], question)
         safety = {
             "level": safety_vo.level,
             "requires_emergency_notice": safety_vo.requires_emergency_notice,
@@ -202,17 +192,41 @@ class AnswerQuestionStreamUseCase:
             pipeline_metadata=meta, pipeline_result={"answer": answer}
         )
         sources = [
-            {"source_type": s.source_type, "title": s.title, "snippet": s.snippet, "rank": s.rank, "metadata": s.metadata}
+            {
+                "id": s.id,
+                "source_type": s.source_type,
+                "title": s.title,
+                "snippet": s.snippet,
+                "rank": s.rank,
+                "metadata": s.metadata,
+            }
             for s in source_records
         ]
+        meta["source_count"] = len(sources)
+        suggested_questions: list[str] = []
+        if (
+            formatted["response_type"] not in {"warning", "disambiguation"}
+            and safety.get("level") != "emergency"
+            and not safety.get("requires_emergency_notice", False)
+        ):
+            from domain.qa.suggestion_policy import generate_suggestions
+
+            suggested_questions = generate_suggestions(
+                question=question,
+                answer=answer,
+                sources=sources,
+                safety=safety,
+                status="success",
+                response_type=formatted["response_type"],
+            )
 
         return AIServiceResult(
             answer=answer or "Không tìm thấy thông tin về chủ đề này.",
-            response_type="text",
-            data=None,
+            response_type=formatted["response_type"],
+            data=formatted.get("data"),
             sources=sources,
             safety=safety,
-            suggested_questions=[],
+            suggested_questions=suggested_questions,
             metadata=meta,
             raw_pipeline_metadata=meta,
         )
@@ -223,6 +237,8 @@ class AnswerQuestionStreamUseCase:
             graph=self._graph,
             vector=self._vector,
             llm=self._llm,
+            intent_extractor=self._intent_extractor,
+            cypher_engine=self._cypher_engine,
             disable_cypher_path=self._disable_cypher,
             default_lightrag_mode=self._default_mode,
         )
@@ -233,8 +249,8 @@ class AnswerQuestionStreamUseCase:
             answer=MSG_TIMEOUT,
             response_type="text",
             data=None,
-            sources=[],
-            safety={"level": "safe", "requires_emergency_notice": False},
+            sources=[{"source_type": "other", "title": "Hệ thống", "snippet": "", "rank": 1, "metadata": {}}],
+            safety={"level": "safe", "requires_emergency_notice": False, "disclaimer": "Thông tin chỉ mang tính chất tham khảo."},
             suggested_questions=[],
             metadata={"error_code": "TIMEOUT", "engine": "unknown", "query_mode": mode or "auto", "execution_time_ms": round(elapsed_ms, 1), "source_count": 0},
             raw_pipeline_metadata={"error_code": "TIMEOUT"},
@@ -245,8 +261,8 @@ class AnswerQuestionStreamUseCase:
             answer=MSG_SYSTEM_ERROR,
             response_type="text",
             data=None,
-            sources=[],
-            safety={"level": "safe", "requires_emergency_notice": False},
+            sources=[{"source_type": "other", "title": "Hệ thống", "snippet": "", "rank": 1, "metadata": {}}],
+            safety={"level": "safe", "requires_emergency_notice": False, "disclaimer": "Thông tin chỉ mang tính chất tham khảo."},
             suggested_questions=[],
             metadata={"error_code": error_code, "engine": "unknown", "query_mode": mode or "auto", "execution_time_ms": round(elapsed_ms, 1), "source_count": 0},
             raw_pipeline_metadata={"error_code": error_code},

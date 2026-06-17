@@ -56,6 +56,8 @@ class AnswerQuestionUseCase:
         graph,
         vector,
         llm,
+        intent_extractor=None,
+        cypher_engine=None,
         disable_cypher_path: bool = False,
         default_lightrag_mode: str = "naive",
     ) -> None:
@@ -63,6 +65,8 @@ class AnswerQuestionUseCase:
             graph=graph,
             vector=vector,
             llm=llm,
+            intent_extractor=intent_extractor,
+            cypher_engine=cypher_engine,
             disable_cypher_path=disable_cypher_path,
             default_lightrag_mode=default_lightrag_mode,
         )
@@ -139,6 +143,7 @@ class AnswerQuestionUseCase:
         # Serialize to plain dicts for API layer
         sources = [
             {
+                "id": s.id,
                 "source_type": s.source_type,
                 "title": s.title,
                 "snippet": s.snippet,
@@ -187,28 +192,25 @@ class AnswerQuestionUseCase:
         sources: list[dict],
         safety: dict,
     ) -> list[str]:
-        """Generate follow-up question suggestions (delegates to legacy service for now)."""
-        try:
-            from app.services import suggestion_service
-            return suggestion_service.generate_suggestions(
-                question=question,
-                answer=answer,
-                sources=sources,
-                safety=safety,
-                status="success",
-                response_type="text",
-            )
-        except Exception as exc:
-            logger.debug("suggestion generation failed: %s", exc)
-            return []
+        """Generate deterministic follow-up question suggestions."""
+        from domain.qa.suggestion_policy import generate_suggestions
+
+        return generate_suggestions(
+            question=question,
+            answer=answer,
+            sources=sources,
+            safety=safety,
+            status="success",
+            response_type="text",
+        )
 
     def _timeout_result(self, elapsed_ms: float, mode: str | None) -> AIServiceResult:
         return AIServiceResult(
             answer=MSG_TIMEOUT,
             response_type="text",
             data=None,
-            sources=[{"source_type": "knowledge_graph", "title": "Hệ thống", "snippet": "", "rank": 1, "metadata": {}}],
-            safety={"level": "safe", "requires_emergency_notice": False},
+            sources=[{"source_type": "other", "title": "Hệ thống", "snippet": "", "rank": 1, "metadata": {}}],
+            safety={"level": "safe", "requires_emergency_notice": False, "disclaimer": "Thông tin chỉ mang tính chất tham khảo."},
             suggested_questions=[],
             metadata={"error_code": "TIMEOUT", "engine": "unknown", "query_mode": mode or "auto", "execution_time_ms": round(elapsed_ms, 1), "source_count": 0},
             raw_pipeline_metadata={"error_code": "TIMEOUT"},
@@ -219,8 +221,8 @@ class AnswerQuestionUseCase:
             answer=MSG_SYSTEM_ERROR,
             response_type="text",
             data=None,
-            sources=[{"source_type": "knowledge_graph", "title": "Hệ thống", "snippet": "", "rank": 1, "metadata": {}}],
-            safety={"level": "safe", "requires_emergency_notice": False},
+            sources=[{"source_type": "other", "title": "Hệ thống", "snippet": "", "rank": 1, "metadata": {}}],
+            safety={"level": "safe", "requires_emergency_notice": False, "disclaimer": "Thông tin chỉ mang tính chất tham khảo."},
             suggested_questions=[],
             metadata={"error_code": "ADAPTER_ERROR", "engine": "unknown", "query_mode": mode or "auto", "execution_time_ms": round(elapsed_ms, 1), "source_count": 0},
             raw_pipeline_metadata={"error_code": "ADAPTER_ERROR"},

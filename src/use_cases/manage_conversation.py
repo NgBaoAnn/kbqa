@@ -16,6 +16,8 @@ import json
 import logging
 from typing import Any
 
+from domain.shared.errors import AuthorizationError, MessageNotFoundError
+
 logger = logging.getLogger(__name__)
 
 # ── Column projections (SQL string constants) ────────────────────────────
@@ -46,8 +48,9 @@ class ManageConversationUseCase:
         db: IDatabaseRepository
     """
 
-    def __init__(self, *, db) -> None:
+    def __init__(self, *, db, version_metadata: dict[str, Any] | None = None) -> None:
         self._db = db
+        self._version_metadata = version_metadata or {}
 
     # ── Conversation CRUD ─────────────────────────────────────────────────
 
@@ -164,7 +167,7 @@ class ManageConversationUseCase:
 
         Returns the ChatResponse-equivalent dict.
         """
-        version_meta = version_meta or {}
+        version_meta = version_meta or self._version_metadata
         meta = ai_result.metadata if isinstance(ai_result.metadata, dict) else {}
 
         msg_metadata: dict[str, Any] = {
@@ -172,6 +175,7 @@ class ManageConversationUseCase:
             **version_meta,
             "original_question": question,
             "suggested_questions": ai_result.suggested_questions,
+            "persisted": True,
         }
 
         data_json = json.dumps(ai_result.data)
@@ -215,10 +219,10 @@ class ManageConversationUseCase:
                     [
                         (
                             assistant_id,
-                            s.get("source_type", "knowledge_graph"),
+                            s.get("source_type", "other"),
                             s.get("title", ""),
                             s.get("snippet", ""),
-                            json.dumps(s.get("metadata", {})),
+                            json.dumps({**(s.get("metadata", {}) or {}), "id": s.get("id")}),
                             s.get("rank", idx + 1),
                         )
                         for idx, s in enumerate(ai_result.sources)
@@ -273,4 +277,48 @@ class ManageConversationUseCase:
             "safety": ai_result.safety,
             "suggested_questions": ai_result.suggested_questions,
             "metadata": msg_metadata,
+        }
+
+    def get_message_trace(
+        self,
+        *,
+        message_id: str,
+        requester_user_id: str,
+        requester_role: str,
+    ) -> dict[str, Any]:
+        """Return version and engine metadata for one assistant message."""
+        row = self._db.fetch_one(
+            """
+            select
+                m.id::text as id,
+                m.metadata,
+                c.user_id::text as owner_id
+            from public.messages m
+            join public.conversations c on c.id = m.conversation_id
+            where m.id = %s
+              and m.role = 'assistant'
+            """,
+            (message_id,),
+        )
+        if row is None:
+            raise MessageNotFoundError(message_id)
+
+        is_owner = row["owner_id"] == requester_user_id
+        is_privileged = requester_role in ("reviewer", "admin")
+        if not is_owner and not is_privileged:
+            raise AuthorizationError("You do not have permission to view this message trace.")
+
+        metadata = row.get("metadata") or {}
+        version_keys = {"prompt_version", "model_name", "kg_version", "pipeline_version"}
+        return {
+            "message_id": message_id,
+            "version_metadata": {
+                "prompt_version": metadata.get("prompt_version", ""),
+                "model_name": metadata.get("model_name", ""),
+                "kg_version": metadata.get("kg_version", ""),
+                "pipeline_version": metadata.get("pipeline_version", ""),
+            },
+            "engine_metadata": {
+                key: value for key, value in metadata.items() if key not in version_keys
+            },
         }
