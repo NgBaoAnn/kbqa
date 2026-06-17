@@ -86,6 +86,50 @@ class TestManageConversationUseCase:
             question="What is diabetes?",
         )
 
+    def test_persist_assistant_response_includes_version_metadata_and_source_id(self):
+        from use_cases.answer_question import AIServiceResult
+
+        conv = self.uc.create_conversation(user_id="user-1", title="Chat")
+        uc = type(self.uc)(
+            db=self.db,
+            version_metadata={
+                "prompt_version": "p1",
+                "model_name": "m1",
+                "kg_version": "kg1",
+                "pipeline_version": "pipe1",
+            },
+        )
+        result = AIServiceResult(
+            answer="Câu trả lời",
+            response_type="text",
+            data=None,
+            sources=[{
+                "id": "source-1",
+                "source_type": "other",
+                "title": "Nguồn",
+                "snippet": "Trích đoạn",
+                "rank": 1,
+                "metadata": {},
+            }],
+            safety={"level": "normal", "requires_emergency_notice": False, "disclaimer": "note"},
+            suggested_questions=["Hỏi tiếp?"],
+            metadata={"engine": "lightrag", "query_mode": "naive", "execution_time_ms": 1.0, "source_count": 1},
+            raw_pipeline_metadata={},
+        )
+
+        persisted = uc.persist_assistant_response(
+            conversation_id=conv["id"],
+            question="Câu hỏi",
+            ai_result=result,
+        )
+
+        assert persisted["metadata"]["prompt_version"] == "p1"
+        assert persisted["metadata"]["model_name"] == "m1"
+        assert persisted["metadata"]["original_question"] == "Câu hỏi"
+        assert persisted["sources"][0]["id"] == "source-1"
+        assert self.db._message_sources[0]["source_type"] == "other"
+        assert self.db._message_sources[0]["metadata"]["id"] == "source-1"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ManageFeedbackUseCase
@@ -238,6 +282,7 @@ class TestAnswerQuestionUseCase:
         assert isinstance(result, AIServiceResult)
         assert result.response_type in {"text", "disambiguation", "warning"}
         assert isinstance(result.sources, list)
+        assert result.sources[0]["id"]
         assert isinstance(result.suggested_questions, list)
 
     @pytest.mark.asyncio
@@ -245,6 +290,24 @@ class TestAnswerQuestionUseCase:
         result = await self.uc.execute(question="Tôi bị đau đầu phải làm gì?")
         assert isinstance(result.safety, dict)
         assert "level" in result.safety
+
+    @pytest.mark.asyncio
+    async def test_lightrag_context_becomes_specific_sources(self):
+        self.vector.seed_answer(
+            "tiểu đường",
+            "Tiểu đường là bệnh mạn tính.",
+            entities=[{"entity_name": "Tiểu đường", "description": "Rối loạn glucose"}],
+            relationships=[{"src_id": "Tiểu đường", "tgt_id": "Insulin", "description": "liên quan"}],
+            chunks=[{"id": "chunk-1", "content": "Nội dung nguồn"}],
+        )
+
+        result = await self.uc.execute(question="tiểu đường là gì?")
+
+        assert [s["source_type"] for s in result.sources] == [
+            "lightrag_entity",
+            "lightrag_relationship",
+            "lightrag_chunk",
+        ]
 
     @pytest.mark.asyncio
     async def test_never_raises(self):
@@ -261,6 +324,105 @@ class TestAnswerQuestionUseCase:
         )
         result = await uc.execute(question="Test")
         assert result.answer != ""  # Error message returned, not raised
+        assert result.sources[0]["source_type"] == "other"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Intent/Cypher migration services
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestLlmIntentExtractor:
+    @pytest.mark.asyncio
+    async def test_extracts_intent_through_llm_port(self):
+        from use_cases.intent_extractor import LlmIntentExtractor
+
+        llm = InMemoryLlmProvider()
+        llm.set_response('{"query_type": "symptoms", "entity": "bệnh tiểu đường"}')
+        extractor = LlmIntentExtractor(llm=llm)
+
+        q_type, entity = await extractor.extract_intent("triệu chứng tiểu đường?")
+
+        assert q_type == "symptoms"
+        assert entity == "tiểu đường"
+        assert llm.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_invalid_llm_payload_degrades_to_regex_fallback_contract(self):
+        from use_cases.intent_extractor import LlmIntentExtractor
+
+        llm = InMemoryLlmProvider()
+        llm.set_response("not-json")
+        extractor = LlmIntentExtractor(llm=llm)
+
+        assert await extractor.extract_intent("x") == (None, None)
+
+
+class TestCypherQaEngine:
+    @pytest.mark.asyncio
+    async def test_template_path_executes_and_synthesizes(self):
+        from use_cases.cypher_qa_engine import CypherQaEngine
+
+        llm = InMemoryLlmProvider()
+        llm.set_response("Bệnh **Tiểu đường** có triệu chứng khát nước.")
+        engine = CypherQaEngine(llm=llm)
+        executed = {}
+
+        async def execute_fn(cypher, params):
+            executed["cypher"] = cypher
+            executed["params"] = params
+            return [{"disease": "Tiểu đường", "symptoms": "khát nước, mệt mỏi"}]
+
+        result = await engine.query(
+            question="triệu chứng tiểu đường?",
+            query_type="symptoms",
+            entity="Tiểu đường",
+            exact=True,
+            execute_fn=execute_fn,
+        )
+
+        assert result["success"] is True
+        assert result["used_template"] is True
+        assert "d.disease_name = $name" in executed["cypher"]
+        assert executed["params"]["name"] == "Tiểu đường"
+        assert result["answer"].startswith("Bệnh **Tiểu đường**")
+
+    @pytest.mark.asyncio
+    async def test_llm_generated_destructive_cypher_falls_back_before_execute(self):
+        from use_cases.cypher_qa_engine import CypherQaEngine
+
+        llm = InMemoryLlmProvider()
+        llm.set_response("MATCH (d:Disease) DELETE d RETURN d")
+        engine = CypherQaEngine(llm=llm)
+        execute_fn = AsyncMock()
+
+        result = await engine.query(
+            question="custom",
+            query_type="not_templated",
+            entity=None,
+            exact=False,
+            execute_fn=execute_fn,
+        )
+
+        assert result["success"] is False
+        assert result["fallback"] is True
+        assert "validation_failed" in result["reason"]
+        execute_fn.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_empty_records_request_lightrag_fallback(self):
+        from use_cases.cypher_qa_engine import CypherQaEngine
+
+        engine = CypherQaEngine(llm=InMemoryLlmProvider())
+
+        result = await engine.query(
+            question="triệu chứng tiểu đường?",
+            query_type="symptoms",
+            entity="Tiểu đường",
+            exact=True,
+            execute_fn=AsyncMock(return_value=[]),
+        )
+
+        assert result == {"success": False, "fallback": True, "reason": "no_records"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -309,11 +471,9 @@ class TestQAPipeline:
     async def test_disambiguation_response(self):
         """Multiple KG matches → disambiguation result."""
         # Seed multiple similar diseases
-        self.graph._diseases = {
-            "Bệnh tiểu đường type 1": None,
-            "Bệnh tiểu đường type 2": None,
-            "Bệnh tiểu đường thai kỳ": None,
-        }
+        self.graph.seed_disease("Bệnh tiểu đường type 1")
+        self.graph.seed_disease("Bệnh tiểu đường type 2")
+        self.graph.seed_disease("Bệnh tiểu đường thai kỳ")
         pipeline_with_cypher = type(self.pipeline)(
             graph=self.graph,
             vector=self.vector,
@@ -323,5 +483,69 @@ class TestQAPipeline:
         # With mocked intent extraction returning "tiểu đường"
         with patch.object(pipeline_with_cypher, '_extract_intent_llm', new=AsyncMock(return_value=("symptoms", "tiểu đường"))):
             result = await pipeline_with_cypher.run("Triệu chứng của tiểu đường là gì?")
-        # Disambiguation or LightRAG fallback depending on data
-        assert result.status in {"success", "error"}
+        assert result.status == "success"
+        assert result.response_type == "disambiguation"
+        assert result.metadata["query_mode"] == "cypher:disambiguation"
+        assert len(result.data) == 3
+
+    @pytest.mark.asyncio
+    async def test_unknown_entity_falls_back_to_lightrag(self):
+        from domain.qa.pipeline import ENGINE_LIGHTRAG
+
+        pipeline_with_cypher = type(self.pipeline)(
+            graph=self.graph,
+            vector=self.vector,
+            llm=self.llm,
+            disable_cypher_path=False,
+        )
+
+        with patch.object(pipeline_with_cypher, '_extract_intent_llm', new=AsyncMock(return_value=("symptoms", "không có trong kg"))):
+            result = await pipeline_with_cypher.run("Triệu chứng bệnh lạ?")
+
+        assert result.status == "success"
+        assert result.metadata["engine"] == ENGINE_LIGHTRAG
+
+    @pytest.mark.asyncio
+    async def test_exact_canonical_match_uses_cypher_engine(self):
+        from domain.qa.pipeline import ENGINE_CYPHER
+
+        class StubCypherEngine:
+            def __init__(self):
+                self.calls = []
+
+            async def query(self, *, question, query_type, entity, exact, execute_fn):
+                self.calls.append({
+                    "question": question,
+                    "query_type": query_type,
+                    "entity": entity,
+                    "exact": exact,
+                })
+                return {
+                    "success": True,
+                    "answer": "Bệnh **Tiểu đường** có triệu chứng khát nước.",
+                    "records": [{"disease": "Tiểu đường", "symptoms": "khát nước"}],
+                    "cypher": "MATCH (d:Disease) RETURN d LIMIT 1",
+                    "used_template": True,
+                }
+
+        self.graph.seed_disease("Tiểu đường")
+        cypher_engine = StubCypherEngine()
+        pipeline_with_cypher = type(self.pipeline)(
+            graph=self.graph,
+            vector=self.vector,
+            llm=self.llm,
+            cypher_engine=cypher_engine,
+            disable_cypher_path=False,
+        )
+
+        with patch.object(pipeline_with_cypher, '_extract_intent_llm', new=AsyncMock(return_value=("symptoms", "Tiểu đường"))):
+            result = await pipeline_with_cypher.run("Triệu chứng tiểu đường?")
+
+        assert result.status == "success"
+        assert result.metadata["engine"] == ENGINE_CYPHER
+        assert cypher_engine.calls == [{
+            "question": "Triệu chứng tiểu đường?",
+            "query_type": "symptoms",
+            "entity": "Tiểu đường",
+            "exact": True,
+        }]

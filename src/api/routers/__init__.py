@@ -10,6 +10,7 @@ from api.routers.health import router as health_router
 from api.routers.knowledge import router as knowledge_router
 from api.routers.me import router as me_router
 from api.routers.query import router as query_router
+from api.routers.schema import router as schema_router
 
 __all__ = [
     "admin_router",
@@ -19,4 +20,5 @@ __all__ = [
     "knowledge_router",
     "me_router",
     "query_router",
+    "schema_router",
 ]

@@ -27,11 +27,18 @@ async def list_diseases(
     offset: int = Query(default=0, ge=0),
 ) -> DiseaseListResponse:
     """List diseases from the Knowledge Graph, optionally filtered by name."""
-    from use_cases.explore_knowledge import ExploreKnowledgeUseCase
-
-    uc = ExploreKnowledgeUseCase(graph=request.app.state.container.graph)
-    result = await uc.list_diseases(search=q, limit=limit, offset=offset)
-    return result
+    uc = request.app.state.container.explore_knowledge
+    try:
+        result = await uc.list_diseases(q=q, limit=limit, offset=offset)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "KNOWLEDGE_GRAPH_UNAVAILABLE",
+                "message": "Knowledge graph is temporarily unavailable.",
+            },
+        ) from exc
+    return DiseaseListResponse(**result.__dict__)
 
 
 @router.get(
@@ -45,20 +52,27 @@ async def get_disease(
     request: Request,
 ) -> DiseaseDetailResponse:
     """Return full disease profile from the Knowledge Graph."""
-    from use_cases.explore_knowledge import ExploreKnowledgeUseCase
-
-    uc = ExploreKnowledgeUseCase(graph=request.app.state.container.graph)
-    data = await uc.get_disease(disease_id=unquote(disease_id))
+    uc = request.app.state.container.explore_knowledge
+    try:
+        data = await uc.get_disease(disease_id=unquote(disease_id))
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "KNOWLEDGE_GRAPH_UNAVAILABLE",
+                "message": "Knowledge graph is temporarily unavailable.",
+            },
+        ) from exc
     if data is None:
         raise HTTPException(status_code=404, detail=f"Disease '{disease_id}' not found.")
 
     return DiseaseDetailResponse(
         id=data.get("disease_name", disease_id),
         disease_name=data.get("disease_name", ""),
-        description=data.get("disease_description"),
-        symptoms=[s["symptom_name"] for s in data.get("symptoms", []) if s.get("symptom_name")],
-        treatments=[t["treatment_name"] for t in data.get("treatments", []) if t.get("treatment_name")],
-        medicines=[m["medicine_name"] for m in data.get("medicines", []) if m.get("medicine_name")],
-        advice=[a["advice_content"] for a in data.get("advice", []) if a.get("advice_content")],
-        metadata={"source": "Neo4j VietMedKG", "category": data.get("disease_category")},
+        description=data.get("description"),
+        symptoms=data.get("symptoms", []),
+        treatments=data.get("treatments", []),
+        medicines=data.get("medicines", []),
+        advice=data.get("advice", []),
+        metadata=data.get("metadata", {}),
     )

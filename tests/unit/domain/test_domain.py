@@ -220,6 +220,54 @@ class TestClassifyIntentRegex:
         assert result.confidence == 0.0
 
 
+class TestCypherTemplatesAndSafety:
+    def test_all_supported_templates_build_read_queries(self):
+        from domain.qa.cypher_builder import build_cypher_query
+        from domain.qa.cypher_safety import validate_cypher
+
+        query_types = [
+            "symptoms",
+            "medicine",
+            "treatment",
+            "advice",
+            "prevention",
+            "department",
+            "profile",
+            "cause",
+            "check_method",
+            "susceptible_population",
+            "linked_diseases",
+            "find_by_symptom",
+            "find_by_medicine",
+            "find_by_nutrition_avoid",
+            "find_by_nutrition_eat",
+            "find_by_prevention",
+            "find_by_check_method",
+            "chain_linked_avoid",
+            "chain_linked_eat",
+        ]
+
+        for query_type in query_types:
+            cypher, params = build_cypher_query(query_type, "tiểu đường", exact=True)
+            assert cypher, query_type
+            assert params is not None
+            assert validate_cypher(cypher) == (True, None)
+
+    def test_unknown_template_returns_none(self):
+        from domain.qa.cypher_builder import build_cypher_query
+
+        assert build_cypher_query("unknown", "x") == (None, None)
+
+    def test_destructive_cypher_is_blocked(self):
+        from domain.qa.cypher_safety import sanitize_cypher, validate_cypher
+
+        is_valid, error = validate_cypher("MATCH (d:Disease) DELETE d")
+        assert is_valid is False
+        assert "Destructive" in error
+        with pytest.raises(ValueError, match="Destructive"):
+            sanitize_cypher("MATCH (d:Disease) DELETE d")
+
+
 class TestEmergencyDetection:
     def test_vi_patterns(self):
         from domain.qa.intent_classifier import detect_emergency_intent

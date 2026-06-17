@@ -7,7 +7,6 @@ No business logic here.
 from __future__ import annotations
 
 import logging
-import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
@@ -22,16 +21,10 @@ from api.schemas.responses import (
     ConversationDetail,
     ConversationSummary,
     MessageRecord,
+    MessageFeedback,
     SafetyPayload,
 )
-from api.schemas.streaming import (
-    StreamFinalPayload,
-    build_delta_event,
-    build_error_event,
-    build_final_event,
-    build_sources_event,
-    build_stage_event,
-)
+from api.streaming_chat import build_message_stream_events
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
@@ -49,10 +42,17 @@ def _row_to_summary(row: dict) -> ConversationSummary:
     )
 
 
-def _result_to_chat_response(result, *, conversation_id: str, message_id: str) -> ChatResponse:
+def _result_to_chat_response(
+    result,
+    *,
+    conversation_id: str,
+    message_id: str,
+    metadata_override: dict | None = None,
+) -> ChatResponse:
     safety_raw = result.safety or {}
     sources = [
         ChatSource(
+            id=s.get("id"),
             source_type=s.get("source_type", "other"),
             title=s.get("title", ""),
             snippet=s.get("snippet"),
@@ -61,7 +61,7 @@ def _result_to_chat_response(result, *, conversation_id: str, message_id: str) -
         )
         for s in (result.sources or [])
     ]
-    meta = result.metadata or {}
+    meta = metadata_override or result.metadata or {}
     return ChatResponse(
         conversation_id=conversation_id,
         message_id=message_id,
@@ -82,10 +82,16 @@ def _result_to_chat_response(result, *, conversation_id: str, message_id: str) -
             execution_time_ms=meta.get("execution_time_ms", 0.0),
             source_count=meta.get("source_count", len(sources)),
             cypher=meta.get("cypher"),
+            prompt_version=meta.get("prompt_version"),
+            model_name=meta.get("model_name"),
+            kg_version=meta.get("kg_version"),
+            pipeline_version=meta.get("pipeline_version"),
             language=meta.get("language"),
             explanation_level=meta.get("explanation_level"),
             answer_style=meta.get("answer_style"),
+            original_question=meta.get("original_question"),
             suggested_questions=result.suggested_questions or [],
+            persisted=meta.get("persisted", True),
         ),
     )
 
@@ -103,9 +109,8 @@ async def create_conversation(
     request: Request = None,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ConversationSummary:
-    from use_cases.manage_conversation import ManageConversationUseCase
-    uc = ManageConversationUseCase(db=request.app.state.container.db)
-    row = uc.create_conversation(user_id=current_user.id, title=payload.title)
+    uc = request.app.state.container.manage_conversation
+    row = uc.create_conversation(user_id=current_user.id, title=payload.title, language=payload.language)
     return _row_to_summary(row)
 
 
@@ -118,8 +123,7 @@ async def list_conversations(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[ConversationSummary]:
-    from use_cases.manage_conversation import ManageConversationUseCase
-    uc = ManageConversationUseCase(db=request.app.state.container.db)
+    uc = request.app.state.container.manage_conversation
     rows = uc.list_conversations(user_id=current_user.id)
     return [_row_to_summary(r) for r in rows]
 
@@ -135,8 +139,7 @@ async def get_conversation(
     request: Request = None,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ConversationDetail:
-    from use_cases.manage_conversation import ManageConversationUseCase
-    uc = ManageConversationUseCase(db=request.app.state.container.db)
+    uc = request.app.state.container.manage_conversation
     data = uc.get_conversation(user_id=current_user.id, conversation_id=conversation_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
@@ -151,6 +154,10 @@ async def get_conversation(
             safety=m.get("safety"),
             suggested_questions=m.get("suggested_questions", []),
             metadata=m.get("metadata", {}),
+            feedback=MessageFeedback(
+                rating=m["feedback_rating"],
+                reason=m.get("feedback_reason"),
+            ) if m.get("feedback_rating") else None,
             created_at=str(m.get("created_at", "")),
         )
         for m in data.get("messages", [])
@@ -172,12 +179,8 @@ async def create_message(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ChatResponse:
     container = request.app.state.container
-    from use_cases.manage_conversation import ManageConversationUseCase
-    from use_cases.manage_preferences import ManagePreferencesUseCase
-
-    conv_uc = ManageConversationUseCase(db=container.db)
-    prefs_uc = ManagePreferencesUseCase(db=container.db)
-    preferences = prefs_uc.get_preferences(user_id=current_user.id)
+    conv_uc = container.manage_conversation
+    preferences = container.manage_preferences.get_preferences(user_id=current_user.id)
 
     # Verify ownership
     if not conv_uc.ensure_owner(user_id=current_user.id, conversation_id=conversation_id):
@@ -208,6 +211,7 @@ async def create_message(
         result,
         conversation_id=conversation_id,
         message_id=persisted["message_id"],
+        metadata_override=persisted["metadata"],
     )
 
 
@@ -224,12 +228,8 @@ async def create_message_stream(
 ):
     """Stream assistant response using Server-Sent Events."""
     container = request.app.state.container
-    from use_cases.manage_preferences import ManagePreferencesUseCase
-    from use_cases.manage_conversation import ManageConversationUseCase
-
-    prefs_uc = ManagePreferencesUseCase(db=container.db)
-    conv_uc = ManageConversationUseCase(db=container.db)
-    preferences = prefs_uc.get_preferences(user_id=current_user.id)
+    conv_uc = container.manage_conversation
+    preferences = container.manage_preferences.get_preferences(user_id=current_user.id)
 
     if not conv_uc.ensure_owner(user_id=current_user.id, conversation_id=conversation_id):
         raise HTTPException(status_code=404, detail="Conversation not found.")
@@ -241,88 +241,15 @@ async def create_message_stream(
         mode=payload.mode,
     )
 
-    async def event_generator():
-        try:
-            yield build_stage_event("routing", "Đang phân tích câu hỏi...")
-
-            delta_tokens: list[str] = []
-
-            async def _collect_delta(token: str):
-                delta_tokens.append(token)
-
-            yield build_stage_event("generating", "Đang tạo câu trả lời...")
-
-            result = await container.answer_question_stream.execute(
-                question=payload.question,
-                mode=payload.mode,
-                preferences=preferences,
-                on_delta=_collect_delta,
-            )
-
-            # Stream accumulated tokens
-            for token in delta_tokens:
-                yield build_delta_event(token, streaming_supported=True)
-
-            # Sources event
-            sources_dicts = [
-                {
-                    "source_type": s.get("source_type", "other"),
-                    "title": s.get("title", ""),
-                    "snippet": s.get("snippet"),
-                    "rank": s.get("rank", 1),
-                    "metadata": s.get("metadata", {}),
-                }
-                for s in (result.sources or [])
-            ]
-            yield build_sources_event(sources_dicts)
-            yield build_stage_event("persisting", "Đang lưu câu trả lời...")
-
-            # Persist response
-            try:
-                persisted = conv_uc.persist_assistant_response(
-                    conversation_id=conversation_id,
-                    question=payload.question,
-                    ai_result=result,
-                )
-                message_id = persisted["message_id"]
-            except Exception as persist_err:
-                logger.warning("Failed to persist assistant message: %s", persist_err)
-                message_id = str(uuid.uuid4())
-
-            # Final event
-            meta = result.metadata or {}
-            safety_raw = result.safety or {}
-            final = StreamFinalPayload(
-                conversation_id=conversation_id,
-                message_id=message_id,
-                status="success",
-                response_type=result.response_type,
-                answer=result.answer,
-                sources=sources_dicts,
-                safety={
-                    "level": safety_raw.get("level", "normal"),
-                    "requires_emergency_notice": safety_raw.get("requires_emergency_notice", False),
-                    "disclaimer": safety_raw.get("disclaimer", "Thông tin chỉ mang tính chất tham khảo."),
-                },
-                suggested_questions=result.suggested_questions or [],
-                metadata={
-                    "engine": meta.get("engine", "unknown"),
-                    "query_mode": meta.get("query_mode", "auto"),
-                    "execution_time_ms": meta.get("execution_time_ms", 0.0),
-                    "source_count": meta.get("source_count", len(sources_dicts)),
-                },
-            )
-            yield build_final_event(final)
-
-        except Exception as exc:
-            logger.exception("Streaming error: %s", exc)
-            yield build_error_event(
-                error_code="STREAM_ERROR",
-                message="Đã xảy ra lỗi trong quá trình phát câu trả lời.",
-            )
-
     return StreamingResponse(
-        event_generator(),
+        build_message_stream_events(
+            conversation_id=conversation_id,
+            question=payload.question,
+            mode=payload.mode,
+            preferences=preferences,
+            answer_question_stream=container.answer_question_stream,
+            manage_conversation=conv_uc,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -344,9 +271,7 @@ async def export_conversation(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Export a conversation as Markdown (default) or PDF."""
-    from use_cases.manage_conversation import ManageConversationUseCase
-
-    uc = ManageConversationUseCase(db=request.app.state.container.db)
+    uc = request.app.state.container.manage_conversation
     data = uc.get_conversation(user_id=current_user.id, conversation_id=conversation_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")

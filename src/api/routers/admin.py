@@ -28,11 +28,9 @@ async def get_metrics(
     request: Request,
     current_user: CurrentUser = Depends(require_admin),
 ) -> AdminMetricsResponse:
-    from use_cases.admin_analytics import AdminAnalyticsUseCase
-
-    uc = AdminAnalyticsUseCase(db=request.app.state.container.db)
-    metrics = await uc.get_metrics()
-    return AdminMetricsResponse(**metrics)
+    uc = request.app.state.container.admin_analytics
+    metrics = uc.get_metrics()
+    return AdminMetricsResponse(**metrics.__dict__)
 
 
 @router.get(
@@ -50,8 +48,11 @@ async def get_review_items(
     offset: int = Query(default=0, ge=0, description="Pagination offset"),
     current_user: CurrentUser = Depends(require_admin),
 ) -> ReviewQueueResponse:
-    from use_cases.admin_analytics import AdminAnalyticsUseCase
-
-    uc = AdminAnalyticsUseCase(db=request.app.state.container.db)
-    result = await uc.get_review_queue(limit=limit, offset=offset)
-    return result
+    uc = request.app.state.container.admin_analytics
+    result = uc.get_review_queue(limit=limit, offset=offset)
+    return ReviewQueueResponse(
+        items=[item.__dict__ for item in result.items],
+        total=result.total,
+        limit=result.limit,
+        offset=result.offset,
+    )

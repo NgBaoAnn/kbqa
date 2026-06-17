@@ -6,7 +6,6 @@ Thin handler: parse → call AnswerQuestionUseCase → format response.
 from __future__ import annotations
 
 import logging
-import uuid
 
 from fastapi import APIRouter, Depends, Request
 
@@ -71,10 +70,33 @@ async def query_medical(
         preferences=preferences,
     )
 
-    return _to_chat_response(result, conversation_id="", message_id=str(uuid.uuid4()))
+    # Map error_code → HTTP status (spec: 05_API_SYSTEM_DESIGN.md §4.2)
+    error_code = (result.metadata or {}).get("error_code")
+    if error_code and error_code in _ERROR_HTTP:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=_ERROR_HTTP[error_code],
+            detail={"error_code": error_code, "message": result.answer},
+        )
+
+    # Standalone query: conversation_id/message_id are null (not persisted)
+    return _to_chat_response(
+        result,
+        conversation_id=None,
+        message_id=None,
+        version_metadata=getattr(container, "version_metadata", {}),
+        original_question=payload.question,
+    )
 
 
-def _to_chat_response(result, *, conversation_id: str, message_id: str) -> ChatResponse:
+def _to_chat_response(
+    result,
+    *,
+    conversation_id: str | None,
+    message_id: str | None,
+    version_metadata: dict | None = None,
+    original_question: str | None = None,
+) -> ChatResponse:
     """Map AIServiceResult → ChatResponse (thin mapping, no business logic)."""
     safety_raw = result.safety or {}
     safety = SafetyPayload(
@@ -85,6 +107,7 @@ def _to_chat_response(result, *, conversation_id: str, message_id: str) -> ChatR
 
     sources = [
         ChatSource(
+            id=s.get("id"),
             source_type=s.get("source_type", "other"),
             title=s.get("title", ""),
             snippet=s.get("snippet"),
@@ -95,16 +118,24 @@ def _to_chat_response(result, *, conversation_id: str, message_id: str) -> ChatR
     ]
 
     meta = result.metadata or {}
+    vm = version_metadata or {}
     metadata = ChatMetadata(
         engine=meta.get("engine", "unknown"),
         query_mode=meta.get("query_mode", "auto"),
         execution_time_ms=meta.get("execution_time_ms", 0.0),
         source_count=meta.get("source_count", len(sources)),
         cypher=meta.get("cypher"),
+        # Version fields from AppContainer.version_metadata
+        prompt_version=vm.get("prompt_version"),
+        model_name=vm.get("model_name"),
+        kg_version=vm.get("kg_version"),
+        pipeline_version=vm.get("pipeline_version"),
         language=meta.get("language"),
         explanation_level=meta.get("explanation_level"),
         answer_style=meta.get("answer_style"),
+        original_question=original_question,
         suggested_questions=result.suggested_questions or [],
+        persisted=False,
     )
 
     return ChatResponse(

@@ -48,9 +48,7 @@ async def get_preferences(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> UserPreferencesResponse:
-    from use_cases.manage_preferences import ManagePreferencesUseCase
-
-    uc = ManagePreferencesUseCase(db=request.app.state.container.db)
+    uc = request.app.state.container.manage_preferences
     row = uc.get_preferences(user_id=current_user.id)
     return UserPreferencesResponse(**row)
 
@@ -69,9 +67,7 @@ async def patch_preferences(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> UserPreferencesResponse:
-    from use_cases.manage_preferences import ManagePreferencesUseCase
-
-    uc = ManagePreferencesUseCase(db=request.app.state.container.db)
+    uc = request.app.state.container.manage_preferences
     patch = body.model_dump(exclude_unset=True, exclude_none=True)
     row = uc.update_preferences(user_id=current_user.id, patch=patch)
     return UserPreferencesResponse(**row)
