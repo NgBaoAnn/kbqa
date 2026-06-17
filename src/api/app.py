@@ -80,6 +80,7 @@ def create_app() -> FastAPI:
         knowledge_router,
         me_router,
         query_router,
+        schema_router,
     )
 
     app.include_router(health_router)
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router)
     app.include_router(admin_router)
     app.include_router(query_router)
+    app.include_router(schema_router)
 
     # ── Root ───────────────────────────────────────────────────────────────
     @app.get("/", tags=["root"])

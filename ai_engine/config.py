@@ -8,17 +8,32 @@ import logging
 import os
 from pathlib import Path
 
-from dotenv import find_dotenv, load_dotenv
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-# ── Load .env from project root ──────────────────────────────────────────
-_dotenv_path = find_dotenv(usecwd=True)
-if _dotenv_path:
-    load_dotenv(_dotenv_path)
-    logger.debug("Loaded .env from: %s", _dotenv_path)
+# ── Load .env files ──────────────────────────────────────────────────────
+# Keep legacy ai_engine imports aligned with the refactored src config.
+# Priority, lowest → highest: root .env, backend/.env, src/.env.
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_ENV_FILES = [
+    _PROJECT_ROOT / ".env",
+    _PROJECT_ROOT / "backend" / ".env",
+    _PROJECT_ROOT / "src" / ".env",
+]
+
+_loaded_env_files: list[str] = []
+for _env_file in _ENV_FILES:
+    if _env_file.exists():
+        load_dotenv(_env_file, override=True)
+        _loaded_env_files.append(str(_env_file))
+
+if _loaded_env_files:
+    logger.info("Loaded env files: %s", ", ".join(_loaded_env_files))
 else:
-    logger.warning("No .env file found — using environment variables / defaults")
+    logger.warning(
+        "No .env file found in root, backend/, or src/ — using environment variables / defaults"
+    )
 
 # ── LLM Server (Ollama/vLLM — OpenAI-compatible API) ──────────────────────
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")

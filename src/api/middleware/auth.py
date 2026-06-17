@@ -49,6 +49,20 @@ def _forbidden_error(detail: str) -> HTTPException:
     )
 
 
+def _map_user_data(user_data: dict[str, Any]) -> CurrentUser:
+    user_id = user_data.get("id") or user_data.get("sub")
+    if not isinstance(user_id, str) or not user_id:
+        raise _auth_error("Authenticated token is missing user id.")
+    return CurrentUser(
+        id=user_id,
+        email=user_data.get("email"),
+        role=user_data.get("role", "user"),
+        claims=user_data.get("claims", user_data),
+        display_name=user_data.get("display_name"),
+        is_active=user_data.get("is_active", True),
+    )
+
+
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
@@ -65,19 +79,9 @@ async def get_current_user(
     # Resolve auth provider from app container
     container = getattr(request.app.state, "container", None)
     if container is None:
-        # Fallback: try legacy SupabaseAuthProvider via adapter directly
-        try:
-            from adapters.supabase.auth_provider import SupabaseAuthProvider
-            from api.config import settings
-            from adapters.supabase.database_repository import SupabaseDatabaseRepository
-
-            db = SupabaseDatabaseRepository(db_url=settings.supabase_db_url or None)
-            auth = SupabaseAuthProvider(jwt_secret=settings.supabase_jwt_secret, db=db)
-        except Exception as exc:
-            logger.error("Auth provider resolution failed: %s", exc)
-            raise _auth_error("Auth service unavailable.") from exc
-    else:
-        auth = container.auth
+        logger.error("Auth provider resolution failed: AppContainer is not initialized")
+        raise _auth_error("Auth service unavailable.")
+    auth = container.auth
 
     try:
         user_data = await auth.verify_token(token)
@@ -88,14 +92,20 @@ async def get_current_user(
     if user_data is None:
         raise _auth_error("Invalid or expired token.")
 
-    return CurrentUser(
-        id=user_data.get("id", ""),
-        email=user_data.get("email"),
-        role=user_data.get("role", "user"),
-        claims=user_data.get("claims", {}),
-        display_name=user_data.get("display_name"),
-        is_active=user_data.get("is_active", True),
-    )
+    current_user = _map_user_data(user_data)
+    if not current_user.is_active:
+        raise _forbidden_error("User profile is inactive.")
+    return current_user
+
+
+async def get_optional_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+) -> CurrentUser | None:
+    """Return CurrentUser when a Bearer token is present, otherwise None."""
+    if credentials is None:
+        return None
+    return await get_current_user(request, credentials)
 
 
 def require_role(*roles: str):

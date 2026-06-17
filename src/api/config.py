@@ -16,23 +16,37 @@ import os
 from pathlib import Path
 from dataclasses import dataclass, field
 
-from dotenv import find_dotenv, load_dotenv
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-# ── Load .env (project root takes priority over cwd) ────────────────────
-_dotenv_path = find_dotenv(usecwd=True)
-if _dotenv_path:
-    load_dotenv(_dotenv_path)
-    logger.debug("Loaded .env from: %s", _dotenv_path)
-else:
-    logger.warning("No .env file found — using environment variables / defaults")
+# ── Load .env files ─────────────────────────────────────────────────────
+# Priority, lowest → highest:
+#   1. root .env       (shared local defaults)
+#   2. backend/.env    (legacy location)
+#   3. src/.env        (new refactored backend location)
+#
+# Later files override earlier files. This lets the refactored app start with
+# `src/.env` while preserving compatibility with existing `backend/.env`.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_ENV_FILES = [
+    _PROJECT_ROOT / ".env",
+    _PROJECT_ROOT / "backend" / ".env",
+    _PROJECT_ROOT / "src" / ".env",
+]
 
-# Also load from backend/.env if present (legacy location)
-_backend_env = Path(__file__).resolve().parents[2] / "backend" / ".env"
-if _backend_env.exists():
-    load_dotenv(_backend_env, override=True)
-    logger.debug("Loaded backend/.env from: %s", _backend_env)
+_loaded_env_files: list[str] = []
+for _env_file in _ENV_FILES:
+    if _env_file.exists():
+        load_dotenv(_env_file, override=True)
+        _loaded_env_files.append(str(_env_file))
+
+if _loaded_env_files:
+    logger.info("Loaded env files: %s", ", ".join(_loaded_env_files))
+else:
+    logger.warning(
+        "No .env file found in root, backend/, or src/ — using environment variables / defaults"
+    )
 
 
 @dataclass(frozen=True)
@@ -113,6 +127,9 @@ class Settings:
     )
     rate_limit_per_minute: int = field(
         default_factory=lambda: int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
+    )
+    check_infra_on_startup: bool = field(
+        default_factory=lambda: os.getenv("CHECK_INFRA_ON_STARTUP", "false").lower() == "true"
     )
 
     # ── Version metadata ─────────────────────────────────────────────────
