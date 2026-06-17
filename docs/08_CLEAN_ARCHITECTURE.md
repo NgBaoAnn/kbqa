@@ -269,13 +269,15 @@ User → POST /api/v1/conversations/{id}/messages
 
 ```
 event: stage    {"stage": "routing",    "message": "Đang phân tích..."}
+event: stage    {"stage": "retrieving", "message": "Đang truy xuất tri thức..."}
 event: stage    {"stage": "generating", "message": "Đang tạo câu trả lời..."}
 event: delta    {"content": "Bệnh", "streaming_supported": true}
 event: delta    {"content": " tiểu", ...}
 ...
-event: sources  {"sources": [...]}
 event: stage    {"stage": "persisting", "message": "Đang lưu..."}
-event: final    {"conversation_id": "...", "message_id": "...", "answer": "..."}
+event: sources  {"sources": [...]}
+event: metadata {"engine": "lightrag", "query_mode": "naive", "execution_time_ms": 1234.5, "source_count": 1}
+event: final    {"conversation_id": "...", "message_id": "...", "answer": "...", "data": null, "metadata": {...}}
 ```
 
 ---
