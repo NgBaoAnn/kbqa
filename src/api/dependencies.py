@@ -32,10 +32,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AppContainer:
-    """Holds all live infrastructure adapter instances.
+    """Holds all live infrastructure adapter instances and pre-built use cases.
 
-    Attributes are typed to the Port interfaces so use-cases
-    depend only on abstractions.
+    Attributes typed to Port interfaces so use-cases depend only on abstractions.
+    Use cases are pre-built here to avoid constructing them per-request.
     """
 
     graph: object       # IGraphRepository
@@ -44,6 +44,9 @@ class AppContainer:
     auth: object        # IAuthProvider
     llm: object         # ILlmProvider
     embedding: object   # IEmbeddingProvider
+    # Pre-built use cases (avoid re-instantiation per request)
+    answer_question: object        # AnswerQuestionUseCase
+    answer_question_stream: object # AnswerQuestionStreamUseCase
 
     @classmethod
     async def create(cls, settings: Settings = default_settings) -> "AppContainer":
@@ -112,6 +115,21 @@ class AppContainer:
             llm_timeout_seconds=settings.llm_timeout_seconds,
         )
 
+        # ── Use Cases ─────────────────────────────────────────────────────
+        from use_cases.answer_question import AnswerQuestionUseCase
+        from use_cases.answer_question_stream import AnswerQuestionStreamUseCase
+
+        answer_question = AnswerQuestionUseCase(
+            graph=graph,
+            vector=vector,
+            llm=llm,
+        )
+        answer_question_stream = AnswerQuestionStreamUseCase(
+            graph=graph,
+            vector=vector,
+            llm=llm,
+        )
+
         logger.info("AppContainer ready.")
         return cls(
             graph=graph,
@@ -120,6 +138,8 @@ class AppContainer:
             auth=auth,
             llm=llm,
             embedding=embedding,
+            answer_question=answer_question,
+            answer_question_stream=answer_question_stream,
         )
 
     async def close(self) -> None:
