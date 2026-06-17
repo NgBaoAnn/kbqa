@@ -100,8 +100,27 @@ class InMemoryDatabaseRepository(IDatabaseRepository):
         # ── MESSAGES ──────────────────────────────────────────────────────
         if "insert into public.messages" in q:
             conv_id = params_list[0]
-            role = params_list[1]
-            content = params_list[2]
+            if "values (%s, 'user'" in q:
+                role = "user"
+                content = params_list[1]
+                response_type = None
+                data = None
+                safety = None
+                metadata = json.loads(params_list[2]) if len(params_list) > 2 and params_list[2] else {}
+            elif "values (%s, 'assistant'" in q:
+                role = "assistant"
+                content = params_list[1]
+                response_type = params_list[2]
+                data = json.loads(params_list[3]) if params_list[3] else None
+                safety = json.loads(params_list[4]) if params_list[4] else None
+                metadata = json.loads(params_list[5]) if params_list[5] else {}
+            else:
+                role = params_list[1]
+                content = params_list[2]
+                response_type = params_list[3] if len(params_list) > 3 else "text"
+                data = None
+                safety = None
+                metadata = None
             msg_id = _new_id()
             now = _now()
             row = {
@@ -109,18 +128,37 @@ class InMemoryDatabaseRepository(IDatabaseRepository):
                 "conversation_id": conv_id,
                 "role": role,
                 "content": content,
-                "response_type": params_list[3] if len(params_list) > 3 else "text",
-                "data": None,
-                "safety": None,
-                "metadata": None,
+                "response_type": response_type,
+                "data": data,
+                "safety": safety,
+                "metadata": metadata,
                 "created_at": now,
             }
             self._messages.append(row)
             return row
 
         if "from public.messages m" in q and "join public.conversations c" in q:
-            # Feedback ownership check — message not in store → None
-            return None
+            msg_id = params_list[0]
+            msg = next((m for m in self._messages if m.get("id") == msg_id), None)
+            if msg is None or msg.get("role") != "assistant":
+                return None
+            conv = self._conversations.get(msg.get("conversation_id"))
+            if conv is None:
+                return None
+            if "m.metadata" in q:
+                return {
+                    "id": msg["id"],
+                    "metadata": msg.get("metadata") or {},
+                    "owner_id": conv.get("_user_id"),
+                }
+            # Feedback ownership check.
+            return {
+                "id": msg["id"],
+                "role": msg.get("role"),
+                "message_id": msg["id"],
+                "conversation_id": msg.get("conversation_id"),
+                "owner_id": conv.get("_user_id"),
+            }
 
         # ── USER PREFERENCES ──────────────────────────────────────────────
         if "from public.user_preferences" in q and "where user_id = " in q and "insert" not in q and "update" not in q:
@@ -247,7 +285,47 @@ class InMemoryDatabaseRepository(IDatabaseRepository):
     def execute(
         self, query: str, params: Iterable[Any] = ()
     ) -> None:
-        pass
+        q = query.strip().lower()
+        params_list = list(params)
+
+        if "insert into public.message_sources" in q:
+            message_id, source_type, title, snippet, metadata_json, rank = params_list
+            self._message_sources.append({
+                "message_id": message_id,
+                "source_type": source_type,
+                "title": title,
+                "snippet": snippet,
+                "metadata": json.loads(metadata_json) if metadata_json else {},
+                "rank": rank,
+            })
+            return
+
+        if "insert into public.query_logs" in q:
+            (
+                message_id,
+                engine,
+                query_mode,
+                execution_time_ms,
+                source_count,
+                status,
+                metadata_json,
+            ) = params_list
+            self._query_logs.append({
+                "message_id": message_id,
+                "engine": engine,
+                "query_mode": query_mode,
+                "execution_time_ms": execution_time_ms,
+                "source_count": source_count,
+                "status": status,
+                "metadata": json.loads(metadata_json) if metadata_json else {},
+            })
+            return
+
+        if "update public.conversations" in q and "updated_at" in q:
+            conv_id = params_list[0]
+            if conv_id in self._conversations:
+                self._conversations[conv_id]["updated_at"] = _now()
+            return
 
     @contextmanager
     def transaction(self) -> Generator[Any, None, None]:

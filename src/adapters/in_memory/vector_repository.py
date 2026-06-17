@@ -12,6 +12,19 @@ from typing import Any
 from ports.vector import IVectorRepository
 
 
+class _InMemoryChunkStream:
+    def __init__(self, answer: str, retrieval_context: dict[str, Any]) -> None:
+        self._answer = answer
+        self.retrieval_context = retrieval_context
+
+    def __aiter__(self):
+        return self._iter()
+
+    async def _iter(self) -> AsyncIterator[str]:
+        for word in self._answer.split():
+            yield word + " "
+
+
 class InMemoryVectorRepository(IVectorRepository):
     """In-memory implementation of IVectorRepository for testing.
 
@@ -69,13 +82,12 @@ class InMemoryVectorRepository(IVectorRepository):
     ) -> tuple[str, AsyncIterator[str]]:
         result = await self.query(question, mode=mode)
         answer = result.get("answer", "")
-
-        async def _stream() -> AsyncIterator[str]:
-            # Simulate streaming by yielding words
-            for word in answer.split():
-                yield word + " "
-
-        return mode, _stream()
+        retrieval_context = {
+            key: result[key]
+            for key in ("entities", "relationships", "chunks")
+            if result.get(key)
+        }
+        return mode, _InMemoryChunkStream(answer, retrieval_context)
 
     async def health_check(self) -> dict[str, Any]:
         return {
