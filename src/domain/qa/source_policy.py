@@ -165,10 +165,15 @@ def normalize_sources_from_pipeline(
                 )]
 
         # LightRAG path
-        if engine == "lightrag" and pipeline_result:
-            entities = pipeline_result.get("entities") or []
-            relationships = pipeline_result.get("relationships") or []
-            chunks = pipeline_result.get("chunks") or []
+        if engine == "lightrag":
+            pipeline_result = pipeline_result or {}
+            entities = pipeline_result.get("entities") or pipeline_metadata.get("entities") or []
+            relationships = (
+                pipeline_result.get("relationships")
+                or pipeline_metadata.get("relationships")
+                or []
+            )
+            chunks = pipeline_result.get("chunks") or pipeline_metadata.get("chunks") or []
             if entities or relationships or chunks:
                 sources = build_lightrag_sources(
                     entities=entities, relationships=relationships,

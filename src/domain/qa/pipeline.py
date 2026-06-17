@@ -32,7 +32,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from domain.qa.intent_classifier import IntentClassifier
+from domain.qa.intent_classifier import FIND_BY_TYPES, IntentClassifier
+from domain.qa.response_formatter import format_lightrag_response
 from domain.qa.value_objects import QueryType
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,18 @@ class PipelineResult:
         return self.status == "success"
 
 
+@dataclass(frozen=True)
+class PipelineRouteDecision:
+    """Public routing decision shared by normal and streaming QA use cases."""
+
+    path: str
+    mode: str | None = None
+    query_type: str | None = None
+    entity: str | None = None
+    exact: bool = False
+    variants: list[str] = field(default_factory=list)
+
+
 class QAPipeline:
     """Hybrid GraphRAG pipeline: Cypher path + LightRAG semantic path.
 
@@ -88,12 +101,16 @@ class QAPipeline:
         graph,           # IGraphRepository
         vector,          # IVectorRepository
         llm,             # ILlmProvider
+        intent_extractor=None,  # IIntentExtractor | None
+        cypher_engine=None,     # ICypherQaEngine | None
         disable_cypher_path: bool = False,
         default_lightrag_mode: str = "naive",
     ) -> None:
         self._graph = graph
         self._vector = vector
         self._llm = llm
+        self._intent_extractor = intent_extractor
+        self._cypher_engine = cypher_engine
         self._disable_cypher = disable_cypher_path
         self._default_mode = default_lightrag_mode
         self._classifier = IntentClassifier()
@@ -125,73 +142,112 @@ class QAPipeline:
             )
 
         try:
-            # ── Step 2: Global bypass check ───────────────────────────────
-            if self._disable_cypher or mode:
-                reason = "disable_cypher_path" if self._disable_cypher else f"mode='{mode}'"
-                logger.info("Pipeline: %s → LightRAG bypass", reason)
-                return await self._lightrag_path(question, mode or self._default_mode, start)
-
-            # ── Step 3: LLM intent extraction ─────────────────────────────
-            query_type, entity = await self._extract_intent_llm(question)
-            routing_method = "llm"
-
-            # ── Step 4: Regex fallback ────────────────────────────────────
-            if entity is None:
-                q_type_regex, entity_regex = self._classifier.classify(question)
-                if q_type_regex:
-                    query_type = q_type_regex
-                if entity_regex:
-                    entity = entity_regex
-                routing_method = "regex_fallback"
-
-            logger.info(
-                "Pipeline: intent type=%s entity=%r method=%s",
-                query_type, entity, routing_method,
-            )
-
-            # ── Step 4b: Reverse-query types (find-by-X) ─────────────────
-            from ai_engine.services.query_router import _FIND_BY_TYPES  # legacy constant
-            if query_type in _FIND_BY_TYPES:
-                if not entity:
-                    logger.info("Reverse type=%s but no keyword → LightRAG", query_type)
-                    return await self._lightrag_path(question, self._default_mode, start)
-                logger.info("Route → CYPHER (reverse type=%s keyword='%s')", query_type, entity)
-                return await self._cypher_path(question, entity, query_type, start, exact=False)
-
-            # ── Step 5: No entity → LightRAG ─────────────────────────────
-            if not entity:
-                logger.info("No entity extracted → LightRAG (method=%s)", routing_method)
-                return await self._lightrag_path(question, self._default_mode, start)
-
-            # ── Step 6: Entity disambiguation via KG ──────────────────────
-            canonical, variants = await self._disambiguate(entity)
-
-            if not variants:
-                logger.info("Entity '%s' not in KG → LightRAG auto-fallback", entity)
-                return await self._lightrag_path(question, self._default_mode, start)
-
-            if canonical is None:
-                elapsed_ms = (time.monotonic() - start) * 1000
-                return self._disambiguation_result(entity, variants, elapsed_ms)
-
-            # ── Step 7: Cypher with canonical match ───────────────────────
-            logger.info("Route → CYPHER (type=%s entity='%s')", query_type, canonical)
-            return await self._cypher_path(question, canonical, query_type, start, exact=True)
+            decision = await self.route_question(question, mode=mode)
+            return await self.execute_route(question, decision, start)
 
         except Exception as exc:
             elapsed_ms = (time.monotonic() - start) * 1000
             logger.exception("Pipeline: unexpected error after %.0fms: %s", elapsed_ms, exc)
             return self._error("DATABASE_ERROR", MSG_SYSTEM_ERROR, start)
 
+    async def route_question(
+        self,
+        question: str,
+        mode: str | None = None,
+    ) -> PipelineRouteDecision:
+        """Return the Cypher/LightRAG/disambiguation decision for a question."""
+        if self._disable_cypher or mode:
+            reason = "disable_cypher_path" if self._disable_cypher else f"mode='{mode}'"
+            logger.info("Pipeline: %s → LightRAG bypass", reason)
+            return PipelineRouteDecision(path="lightrag", mode=mode or self._default_mode)
+
+        query_type, entity = await self._extract_intent_llm(question)
+        routing_method = "llm"
+
+        if entity is None:
+            q_type_regex, entity_regex = self._classifier.classify(question)
+            if q_type_regex:
+                query_type = q_type_regex
+            if entity_regex:
+                entity = entity_regex
+            routing_method = "regex_fallback"
+
+        logger.info(
+            "Pipeline: intent type=%s entity=%r method=%s",
+            query_type, entity, routing_method,
+        )
+
+        if query_type in FIND_BY_TYPES:
+            if not entity:
+                logger.info("Reverse type=%s but no keyword → LightRAG", query_type)
+                return PipelineRouteDecision(path="lightrag", mode=self._default_mode)
+            logger.info("Route → CYPHER (reverse type=%s keyword='%s')", query_type, entity)
+            return PipelineRouteDecision(
+                path="cypher",
+                query_type=query_type,
+                entity=entity,
+                exact=False,
+            )
+
+        if not entity:
+            logger.info("No entity extracted → LightRAG (method=%s)", routing_method)
+            return PipelineRouteDecision(path="lightrag", mode=self._default_mode)
+
+        canonical, variants = await self._disambiguate(entity)
+
+        if not variants:
+            logger.info("Entity '%s' not in KG → LightRAG auto-fallback", entity)
+            return PipelineRouteDecision(path="lightrag", mode=self._default_mode)
+
+        if canonical is None:
+            return PipelineRouteDecision(
+                path="disambiguation",
+                entity=entity,
+                variants=variants,
+            )
+
+        logger.info("Route → CYPHER (type=%s entity='%s')", query_type, canonical)
+        return PipelineRouteDecision(
+            path="cypher",
+            query_type=query_type,
+            entity=canonical,
+            exact=True,
+        )
+
+    async def execute_route(
+        self,
+        question: str,
+        decision: PipelineRouteDecision,
+        start: float,
+    ) -> PipelineResult:
+        """Execute a public route decision and return a normalized pipeline result."""
+        if decision.path == "cypher":
+            return await self._cypher_path(
+                question,
+                decision.entity,
+                decision.query_type,
+                start,
+                exact=decision.exact,
+            )
+        if decision.path == "disambiguation":
+            elapsed_ms = (time.monotonic() - start) * 1000
+            return self._disambiguation_result(
+                decision.entity or "",
+                decision.variants,
+                elapsed_ms,
+            )
+        return await self._lightrag_path(question, decision.mode or self._default_mode, start)
+
     # ── Intent Extraction ─────────────────────────────────────────────────
 
     async def _extract_intent_llm(
         self, question: str
     ) -> tuple[str | None, str | None]:
-        """Use legacy LLM-based intent extractor (delegates to ai_engine for now)."""
+        """Use injected LLM-based intent extractor; regex fallback handles failures."""
+        if self._intent_extractor is None:
+            return None, None
         try:
-            from ai_engine.services.query_router import extract_intent_with_llm
-            return await extract_intent_with_llm(question)
+            return await self._intent_extractor.extract_intent(question)
         except Exception as exc:
             logger.warning("LLM intent extraction failed: %s — falling back to regex", exc)
             return None, None
@@ -238,9 +294,10 @@ class QAPipeline:
         start: float,
         exact: bool = False,
     ) -> PipelineResult:
-        """Execute Cypher path via ai_engine facade (text-to-Cypher → Neo4j → synthesis)."""
-        from ai_engine.services.cypher_graph_service import query as _cypher_query
-        from ai_engine.utils.response_formatter import format_lightrag_response
+        """Execute Cypher path via injected QA engine."""
+        if self._cypher_engine is None:
+            logger.warning("Cypher engine is not configured → LightRAG fallback")
+            return await self._lightrag_path(question, self._default_mode, start)
 
         logger.info("Cypher path: type=%s entity='%s' exact=%s", query_type, disease_name, exact)
 
@@ -249,7 +306,7 @@ class QAPipeline:
         async def _execute_fn(cypher: str, params: dict | None = None):
             return await self._graph.execute_cypher(cypher, params)
 
-        result = await _cypher_query(
+        result = await self._cypher_engine.query(
             question=question,
             query_type=query_type,
             entity=disease_name,
@@ -273,19 +330,27 @@ class QAPipeline:
         use_template = result["used_template"]
         records = result["records"]
 
-        # Build structured data for template results
-        data = self._extract_structured_data(query_type, records) if use_template else None
+        query_mode = f"cypher:{'template' if use_template else 'llm'}:{query_type}"
+        formatted = format_lightrag_response(
+            raw_answer=answer_text,
+            question=question,
+            query_mode=query_mode,
+            execution_time_ms=elapsed_ms,
+        )
+
+        # Legacy Cypher template results expose deterministic table records when present.
+        data = self._extract_structured_data(query_type, records) if use_template else formatted.get("data")
 
         return PipelineResult(
             status="success",
-            answer=answer_text,
-            response_type="text",
+            answer=formatted["answer"],
+            response_type=formatted["response_type"],
             data=data,
             metadata={
                 "engine": ENGINE_CYPHER,
-                "query_mode": f"cypher:{'template' if use_template else 'llm'}:{query_type}",
+                "query_mode": query_mode,
                 "execution_time_ms": round(elapsed_ms, 1),
-                "source_count": len(data) if data else 0,
+                "source_count": len(data) if data else formatted.get("metadata", {}).get("source_count", 1),
                 "cypher": cypher.strip(),
             },
         )
@@ -311,16 +376,29 @@ class QAPipeline:
                 code, msg = "LIGHTRAG_QUERY_FAILED", MSG_GENERATION_FAILED
             return self._error(code, msg, start)
 
+        effective_mode = result.get("mode", mode or self._default_mode)
+        formatted = format_lightrag_response(
+            raw_answer=result.get("answer", ""),
+            question=question,
+            query_mode=effective_mode,
+            execution_time_ms=elapsed_ms,
+        )
+        metadata = dict(formatted.get("metadata") or {})
+        metadata.update({
+            "engine": ENGINE_LIGHTRAG,
+            "query_mode": effective_mode,
+            "execution_time_ms": round(elapsed_ms, 1),
+        })
+        for key in ("entities", "relationships", "chunks"):
+            if result.get(key):
+                metadata[key] = result[key]
+
         return PipelineResult(
             status="success",
-            answer=result["answer"],
-            response_type="text",
-            metadata={
-                "engine": ENGINE_LIGHTRAG,
-                "query_mode": result.get("mode", mode or self._default_mode),
-                "execution_time_ms": round(elapsed_ms, 1),
-                "source_count": 0,
-            },
+            answer=formatted["answer"],
+            response_type=formatted["response_type"],
+            data=formatted.get("data"),
+            metadata=metadata,
         )
 
     # ── Helpers ───────────────────────────────────────────────────────────
