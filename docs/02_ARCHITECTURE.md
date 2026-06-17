@@ -1,84 +1,81 @@
 # Kiến trúc Hệ thống
 
-## Cấu trúc Monorepo
+> **Xem tài liệu kiến trúc đầy đủ tại:** [08_CLEAN_ARCHITECTURE.md](./08_CLEAN_ARCHITECTURE.md)
+
+Tài liệu này tóm tắt kiến trúc AS-IS (trước khi refactor) và TO-BE (sau Phase 0–5).
+
+---
+
+## AS-IS (Trước refactor)
+
+Kiến trúc monolith đơn giản — backend và AI engine tách nhau nhưng còn nhiều coupling trực tiếp:
 
 ```
 kbqa/
 ├── backend/          # FastAPI backend
-│   ├── app/
-│   │   ├── main.py              # Entrypoint, middleware, router registration
-│   │   ├── config.py            # Env vars: Supabase, Neo4j, API settings
-│   │   ├── database.py          # Supabase Postgres access layer (psycopg)
-│   │   ├── api_gateway/         # Auth dependencies (JWT verification)
-│   │   ├── models/              # Pydantic contracts (request/response)
-│   │   ├── routers/             # API route handlers
-│   │   └── services/            # Business logic layer
-│   ├── migrations/supabase/     # SQL migrations (versions, rollbacks, seeds)
-│   └── tests/                   # pytest test suites
+│   └── app/
+│       ├── main.py              # Entrypoint, middleware, router registration
+│       ├── config.py            # Env vars: Supabase, Neo4j, API settings
+│       ├── models/contracts.py  # 25+ Pydantic models trong 1 file (567 dòng)
+│       ├── routers/             # 9 router files
+│       └── services/            # 16 service files (pipeline, chat, AI adapter, ...)
 │
-├── ai_engine/        # AI/ML core (tách khỏi backend)
-│   ├── config.py                # LLM, Embedding, Neo4j, LightRAG settings
-│   ├── services/                # Query router, Cypher builder, LightRAG, etc.
-│   ├── prompts/                 # Prompt templates (text_to_cypher)
-│   ├── eval/                    # Benchmark & golden test set
-│   └── utils/                   # Response formatter, helpers
+├── ai_engine/        # AI/ML core — tách khỏi backend
+│   ├── config.py                # ⚠️ Trùng lặp Neo4j config với backend
+│   ├── services/                # Query router, Cypher builder, LightRAG, ...
+│   └── prompts/                 # Prompt templates
 │
-├── etl/              # Data pipeline
-│   ├── data_cleaning/           # CSV preprocessing
-│   └── graph_builder/           # build_graph.py — CSV → Neo4j import
-│
-├── frontend/         # React SPA (Vite + TypeScript)
-│   └── src/
-│       ├── App.tsx              # Auth-aware root component
-│       ├── features/            # chat, auth, admin, settings, knowledge
-│       ├── components/          # ResponseRenderer, FeedbackControls, SourcePanel
-│       └── services/            # api.ts, supabase.ts
-│
-├── scripts/          # Utility scripts
-│   ├── ingest_to_neo4j.py       # Qdrant → Neo4j sync (LightRAG entities)
-│   └── deploy_ec2.sh            # EC2 deployment script
-│
-├── data/             # preprocessed_data.csv (~63MB)
-└── pyproject.toml    # Python project config, dependencies
+├── etl/              # Data pipeline (rải rác)
+└── frontend/         # React SPA (Vite + TypeScript)
 ```
 
-## Luồng xử lý chính (Query Pipeline)
+**Vấn đề chính:**
+- `pipeline.py` (596 dòng) — God Object chứa toàn bộ routing logic
+- Config trùng lặp ở 2 file (`backend/config.py` và `ai_engine/config.py`)
+- `contracts.py` (567 dòng) — 25+ model lẫn lộn API contracts và internal DTOs
+- Cross-module direct imports: không thể test pipeline mà không mock toàn bộ ai_engine
+
+---
+
+## TO-BE (Sau refactor — Modular Monolith + Clean Architecture)
+
+Xem chi tiết tại [08_CLEAN_ARCHITECTURE.md](./08_CLEAN_ARCHITECTURE.md).
+
+### Cấu trúc mới (`src/` layout)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  1. User gửi câu hỏi qua Frontend                              │
-│  2. Frontend call POST /api/v1/conversations/{id}/messages      │
-│  3. chat_service → ai_service → pipeline.run_pipeline()         │
-│                                                                  │
-│  4. Pipeline:                                                    │
-│     a. extract_intent_with_llm()    ← LLM structured extraction │
-│     b. classify_cypher_intent()     ← Regex fallback             │
-│     c. Routing decision:                                         │
-│        - entity in KG  → Cypher Path (Neo4j direct query)        │
-│        - entity not in KG / no entity → LightRAG Path            │
-│        - find_by_* types → Cypher reverse query                  │
-│     d. Cypher fails → auto fallback to LightRAG                  │
-│                                                                  │
-│  5. Response → chat_service persists messages → return to client  │
-└─────────────────────────────────────────────────────────────────┘
+src/
+├── domain/       # 🟢 Pure business logic (no I/O)
+├── ports/        # 🟢 Abstract interfaces (IGraphRepository, ILlmProvider, ...)
+├── use_cases/    # 🔵 Orchestration (AnswerQuestionUseCase, ManageConversationUseCase, ...)
+├── adapters/     # 🔴 Infrastructure (Neo4j, Supabase, LightRAG, Ollama, InMemory)
+└── api/          # 🟠 FastAPI HTTP layer (app factory, routers, schemas, middleware)
 ```
 
-## Query Types hỗ trợ
+### Dependency Rule
 
-### Forward (entity = tên bệnh)
-`symptoms`, `cause`, `check_method`, `susceptible_population`, `medicine`, `treatment`, `advice`, `prevention`, `department`, `profile`, `linked_diseases`
+```
+Domain ← Use Cases ← Routers
+  ↑
+Ports ← Adapters
+```
 
-### Reverse (entity = keyword)
-`find_by_symptom`, `find_by_medicine`, `find_by_nutrition_avoid`, `find_by_nutrition_eat`, `find_by_prevention`, `find_by_check_method`
-
-### Chain (2-hop)
-`chain_linked_avoid`, `chain_linked_eat`
-
-## External Services
+### External Services
 
 | Service | Vai trò |
-|---|---|
-| **Neo4j AuraDB** | Knowledge Graph (VietMedKG schema + LightRAG `:base` nodes) |
+|---------|---------|
+| **Neo4j AuraDB** | Knowledge Graph (VietMedKG schema) |
 | **Supabase** | Auth (JWT), Postgres (conversations, messages, feedback, preferences, query_logs) |
 | **Qdrant Cloud** | Vector DB cho LightRAG (entities, relationships, chunks) |
 | **Ollama / vLLM** | LLM server (OpenAI-compatible endpoint) |
+
+### Query Types hỗ trợ
+
+**Forward** (entity = tên bệnh):
+`symptoms`, `cause`, `check_method`, `susceptible_population`, `medicine`, `treatment`, `advice`, `prevention`, `department`, `profile`, `linked_diseases`
+
+**Reverse** (entity = keyword):
+`find_by_symptom`, `find_by_medicine`, `find_by_nutrition_avoid`, `find_by_nutrition_eat`, `find_by_prevention`, `find_by_check_method`
+
+**Chain** (2-hop):
+`chain_linked_avoid`, `chain_linked_eat`
