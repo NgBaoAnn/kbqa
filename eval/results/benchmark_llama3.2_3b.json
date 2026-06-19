@@ -1,0 +1,100 @@
+{
+  "model": "llama3.2:3b",
+  "timestamp": "2026-03-21T17:08:37.980532",
+  "total_questions": 10,
+  "avg_latency_ms": 1247.1,
+  "vram_usage": "2.8 GB",
+  "processor": "100% GPU",
+  "results": [
+    {
+      "id": 1,
+      "category": "basic",
+      "lang": "en",
+      "question": "What are the symptoms of heart failure?",
+      "expected_cypher": "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) WHERE toLower(d.name) CONTAINS \"heart failure\" RETURN s.name AS symptom",
+      "generated_cypher": "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) WHERE toLower(d.name) CONTAINS \"heart failure\" RETURN s.name AS symptom",
+      "latency_ms": 1224.2
+    },
+    {
+      "id": 2,
+      "category": "basic",
+      "lang": "en",
+      "question": "Which drugs treat tuberculosis?",
+      "expected_cypher": "MATCH (d:Disease)-[:TREATED_BY]->(dr:Drug) WHERE toLower(d.name) CONTAINS \"tuberculosis\" RETURN dr.name AS drug",
+      "generated_cypher": "MATCH (d:Disease)-[:TREATED_BY]->(dr:Drug) WHERE toLower(d.name) CONTAINS \"tuberculosis\" RETURN dr.name AS drug",
+      "latency_ms": 1131.6
+    },
+    {
+      "id": 3,
+      "category": "multi-hop",
+      "lang": "en",
+      "question": "Which diseases share the same treatment as asthma?",
+      "expected_cypher": "MATCH (d1:Disease)-[:TREATED_BY]->(dr:Drug)<-[:TREATED_BY]-(d2:Disease) WHERE toLower(d1.name) CONTAINS \"asthma\" AND d1 <> d2 RETURN d2.name AS disease, dr.name AS drug",
+      "generated_cypher": "MATCH (d:Disease)-[:TREATED_BY]->(dr:Drug)\nWHERE d.name = \"Asthma\"\nRETURN d.name AS disease, COLLECT(dr.name) AS treatment",
+      "latency_ms": 1232.1
+    },
+    {
+      "id": 4,
+      "category": "stats",
+      "lang": "en",
+      "question": "Which drug is used to treat the most diseases?",
+      "expected_cypher": "MATCH (d:Disease)-[:TREATED_BY]->(dr:Drug) RETURN dr.name AS drug, COUNT(d) AS disease_count ORDER BY disease_count DESC LIMIT 1",
+      "generated_cypher": "MATCH (d:Disease)-[:TREATED_BY]->(dr:Drug)\nRETURN dr.name AS drug, COUNT(d) AS num_diseases\nORDER BY num_diseases DESC\nLIMIT 1",
+      "latency_ms": 1344.3
+    },
+    {
+      "id": 5,
+      "category": "multi-hop",
+      "lang": "en",
+      "question": "What are all the drugs and symptoms associated with lung cancer?",
+      "expected_cypher": "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom), (d)-[:TREATED_BY]->(dr:Drug) WHERE toLower(d.name) CONTAINS \"lung cancer\" RETURN s.name AS symptom, dr.name AS drug",
+      "generated_cypher": "MATCH (d:Disease {name: \"Lung Cancer\"}),\n         (d)-[:HAS_SYMPTOM]->(s:Symptom),\n         (d)-[:TREATED_BY]->(dr:Drug)\n   WHERE toLower(d.name) CONTAINS \"lung cancer\"\n   RETURN s.name AS symptom, dr.name AS drug",
+      "latency_ms": 2009.3
+    },
+    {
+      "id": 6,
+      "category": "basic",
+      "lang": "vi",
+      "question": "Bệnh viêm gan B có triệu chứng gì?",
+      "expected_cypher": "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) WHERE toLower(d.name) CONTAINS \"hepatitis b\" RETURN s.name AS symptom",
+      "generated_cypher": "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom) WHERE toLower(d.name) CONTAINS \"viêm gan B\" RETURN s.name AS symptom",
+      "latency_ms": 1219.1
+    },
+    {
+      "id": 7,
+      "category": "basic",
+      "lang": "vi",
+      "question": "Thuốc nào chữa bệnh trầm cảm?",
+      "expected_cypher": "MATCH (d:Disease)-[:TREATED_BY]->(dr:Drug) WHERE toLower(d.name) CONTAINS \"depression\" RETURN dr.name AS drug",
+      "generated_cypher": "MATCH (d:Disease)-[:TREATED_BY]->(dr:Drug) WHERE toLower(d.name) CONTAINS \"trầm cảm\" RETURN dr.name AS drug",
+      "latency_ms": 1139.7
+    },
+    {
+      "id": 8,
+      "category": "multi-hop",
+      "lang": "vi",
+      "question": "Bệnh nào có cả triệu chứng mệt mỏi và khó thở?",
+      "expected_cypher": "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s1:Symptom), (d)-[:HAS_SYMPTOM]->(s2:Symptom) WHERE toLower(s1.name) CONTAINS \"fatigue\" AND toLower(s2.name) CONTAINS \"shortness of breath\" RETURN d.name AS disease",
+      "generated_cypher": "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s1:Symptom {name: 'mệt mỏi'}),\n         (d)-[:HAS_SYMPTOM]->(s2:Symptom {name: 'khó thở'})\nWHERE toLower(d.name) CONTAINS 'bệnh'\nRETURN d.name AS disease",
+      "latency_ms": 2189.2
+    },
+    {
+      "id": 9,
+      "category": "stats",
+      "lang": "vi",
+      "question": "Có bao nhiêu loại thuốc trong hệ thống?",
+      "expected_cypher": "MATCH (dr:Drug) RETURN COUNT(dr) AS total_drugs",
+      "generated_cypher": "MATCH (dr:Drug) RETURN COUNT(dr) AS total_drugs",
+      "latency_ms": 616.4
+    },
+    {
+      "id": 10,
+      "category": "basic",
+      "lang": "vi",
+      "question": "Thời tiết hôm nay thế nào?",
+      "expected_cypher": "RETURN 'OUT_OF_DOMAIN'",
+      "generated_cypher": "RETURN 'OUT_OF_DOMAIN'",
+      "latency_ms": 364.5
+    }
+  ]
+}

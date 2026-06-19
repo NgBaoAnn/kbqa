@@ -1,0 +1,18 @@
+{
+  "qwen2.5:3b": {
+    "model": "qwen2.5:3b",
+    "timestamp": "2026-03-21T17:08:19.641078",
+    "total_questions": 10,
+    "avg_latency_ms": 1269.4,
+    "vram_usage": "2.4 GB",
+    "processor": "100% GPU"
+  },
+  "llama3.2:3b": {
+    "model": "llama3.2:3b",
+    "timestamp": "2026-03-21T17:08:37.980532",
+    "total_questions": 10,
+    "avg_latency_ms": 1247.1,
+    "vram_usage": "2.8 GB",
+    "processor": "100% GPU"
+  }
+}
