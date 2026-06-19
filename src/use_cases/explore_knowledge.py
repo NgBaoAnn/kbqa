@@ -174,3 +174,11 @@ class ExploreKnowledgeUseCase:
             "advice": advice,
             "metadata": metadata,
         }
+
+    async def get_schema_info(self) -> dict[str, Any]:
+        """Return knowledge graph schema information."""
+        try:
+            return await self._graph.get_schema_info()
+        except Exception as exc:
+            logger.error("ExploreKnowledgeUseCase.get_schema_info failed: %s", exc)
+            raise RuntimeError("KNOWLEDGE_GRAPH_UNAVAILABLE") from exc

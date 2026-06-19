@@ -19,9 +19,9 @@ router = APIRouter(prefix="/api/v1", tags=["schema"])
     ),
 )
 async def schema_info(request: Request) -> dict:
-    """Return graph schema information from the configured graph adapter."""
+    """Return graph schema information from the knowledge use case."""
     try:
-        return await request.app.state.container.graph.get_schema_info()
+        return await request.app.state.container.explore_knowledge.get_schema_info()
     except Exception as exc:
         logger.error("Schema endpoint error: %s", exc)
         return {"nodes": [], "relationships": [], "error": str(exc)}

@@ -21,56 +21,19 @@ router = APIRouter(tags=["health"])
 async def health(request: Request) -> HealthResponse:
     """Return overall system health.
 
-    Checks Neo4j and LightRAG connectivity if the AppContainer is available.
+    Delegates dependency checks to SystemHealthUseCase.
     """
-    services = ServiceStatus(api="running", ai_engine="ready")
-    overall = "healthy"
-
     container = getattr(request.app.state, "container", None)
     if container is None:
+        services = ServiceStatus(api="running", ai_engine="not_initialized")
         services.ai_engine = "not_initialized"
         return HealthResponse(status="degraded", services=services, version=settings.pipeline_version)
 
-    # Neo4j / Graph
-    try:
-        ok = await container.graph.check_connectivity()
-        services.neo4j = "connected" if ok else "unavailable"
-        if not ok:
-            overall = "degraded"
-    except Exception as exc:
-        logger.warning("Neo4j health check failed: %s", exc)
-        services.neo4j = "unavailable"
-        overall = "degraded"
-
-    # Supabase/Postgres
-    try:
-        container.db.fetch_one("select 1 as ok")
-        services.supabase_postgres = "connected"
-    except Exception as exc:
-        logger.warning("Postgres health check failed: %s", exc)
-        services.supabase_postgres = "unavailable"
-        overall = "degraded"
-
-    # LightRAG / Vector
-    try:
-        vector_health = await container.vector.health_check()
-        services.lightrag = vector_health.get("lightrag", "unknown")
-        services.llm_server = vector_health.get("llm_server", "unknown")
-        services.embedding_server = vector_health.get("embedding_server", "unknown")
-        if services.lightrag in {"error", "unavailable"}:
-            overall = "degraded"
-    except Exception as exc:
-        logger.warning("LightRAG health check failed: %s", exc)
-        services.lightrag = "unavailable"
-        services.llm_server = "unknown"
-        services.embedding_server = "unknown"
-        overall = "degraded"
-
-    version_meta = getattr(container, "version_metadata", {}) or {}
+    result = await container.system_health.execute()
     return HealthResponse(
-        status=overall,
-        services=services,
-        version=version_meta.get("pipeline_version") or settings.pipeline_version,
+        status=result.status,
+        services=ServiceStatus(**result.services),
+        version=result.version,
     )
 
 
@@ -82,7 +45,7 @@ async def graph_schema(request: Request) -> dict:
     if container is None:
         return {"error": "container not initialized"}
     try:
-        return await container.graph.get_schema_info()
+        return await container.explore_knowledge.get_schema_info()
     except Exception as exc:
         logger.error("Schema fetch failed: %s", exc)
         return {"error": str(exc)}

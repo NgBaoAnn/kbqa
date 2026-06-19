@@ -44,6 +44,7 @@ from use_cases.explore_knowledge import ExploreKnowledgeUseCase
 from use_cases.manage_conversation import ManageConversationUseCase
 from use_cases.manage_feedback import ManageFeedbackUseCase
 from use_cases.manage_preferences import ManagePreferencesUseCase
+from use_cases.system_health import SystemHealthUseCase
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ class AppContainer:
     explore_knowledge: ExploreKnowledgeUseCase
     manage_preferences: ManagePreferencesUseCase
     admin_analytics: AdminAnalyticsUseCase
+    system_health: SystemHealthUseCase
     version_metadata: dict[str, str]
 
     @classmethod
@@ -202,6 +204,12 @@ class AppContainer:
             manage_conversation=manage_conversation,
         )
         admin_analytics = AdminAnalyticsUseCase(db=db)
+        system_health = SystemHealthUseCase(
+            graph=graph,
+            vector=vector,
+            db=db,
+            pipeline_version=version_metadata["pipeline_version"],
+        )
 
         logger.info("AppContainer ready.")
         return cls(
@@ -223,6 +231,7 @@ class AppContainer:
             explore_knowledge=explore_knowledge,
             manage_preferences=manage_preferences,
             admin_analytics=admin_analytics,
+            system_health=system_health,
             version_metadata=version_metadata,
         )
 
