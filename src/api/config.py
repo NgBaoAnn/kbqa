@@ -1,8 +1,7 @@
 """Unified project configuration for the new src/ layout.
 
 This module is the single source of truth for all environment variables.
-It supersedes ai_engine/config.py and backend/app/config.py.
-Both legacy modules remain unchanged during Phase 3 to preserve backwards compatibility.
+It supersedes ai_engine/config.py (legacy modules remain for reference only).
 
 Usage:
     from api.config import settings
@@ -22,16 +21,13 @@ logger = logging.getLogger(__name__)
 
 # ── Load .env files ─────────────────────────────────────────────────────
 # Priority, lowest → highest:
-#   1. root .env       (shared local defaults)
-#   2. backend/.env    (legacy location)
-#   3. src/.env        (new refactored backend location)
+#   1. root .env   (shared local defaults)
+#   2. src/.env    (app-specific overrides)
 #
-# Later files override earlier files. This lets the refactored app start with
-# `src/.env` while preserving compatibility with existing `backend/.env`.
+# Later files override earlier files.
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _ENV_FILES = [
     _PROJECT_ROOT / ".env",
-    _PROJECT_ROOT / "backend" / ".env",
     _PROJECT_ROOT / "src" / ".env",
 ]
 
@@ -45,7 +41,7 @@ if _loaded_env_files:
     logger.info("Loaded env files: %s", ", ".join(_loaded_env_files))
 else:
     logger.warning(
-        "No .env file found in root, backend/, or src/ — using environment variables / defaults"
+        "No .env file found in root or src/ — using environment variables / defaults"
     )
 
 
