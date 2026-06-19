@@ -1,4 +1,0 @@
-# Benchmark results (generated per run)
-eval/results/*.json
-eval/results/*.md
-!eval/results/.gitkeep

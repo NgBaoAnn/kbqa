@@ -21,14 +21,15 @@ logger = logging.getLogger(__name__)
 
 # ── Load .env files ─────────────────────────────────────────────────────
 # Priority, lowest → highest:
-#   1. root .env   (shared local defaults)
-#   2. src/.env    (app-specific overrides)
+#   1. root .env      (shared local defaults)
+#   2. backend/.env   (backend-specific overrides)
 #
 # Later files override earlier files.
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _ENV_FILES = [
     _PROJECT_ROOT / ".env",
-    _PROJECT_ROOT / "src" / ".env",
+    _PROJECT_ROOT / "backend" / ".env",
+    _PROJECT_ROOT / "backend" / "src" / ".env",
 ]
 
 _loaded_env_files: list[str] = []
@@ -41,7 +42,7 @@ if _loaded_env_files:
     logger.info("Loaded env files: %s", ", ".join(_loaded_env_files))
 else:
     logger.warning(
-        "No .env file found in root or src/ — using environment variables / defaults"
+        "No .env file found in root or backend/ — using environment variables / defaults"
     )
 
 
