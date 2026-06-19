@@ -1,5 +1,6 @@
 /**
- * Typed contracts mirroring backend/app/models/contracts.py
+ * Typed contracts mirroring src/api/schemas/responses.py and
+ * src/api/schemas/requests.py (new Clean Architecture backend).
  * Do not add response shapes that aren't in the backend contract.
  */
 
@@ -74,7 +75,8 @@ export interface ChatSource {
 }
 
 export interface SafetyPayload {
-  level: "normal" | "caution" | "emergency";
+  /** 'safe' is emitted by the new backend for non-medical queries */
+  level: "normal" | "caution" | "emergency" | "safe";
   requires_emergency_notice: boolean;
   disclaimer: string;
 }
@@ -112,8 +114,10 @@ export type ChatResponseData =
   | null;
 
 export interface ChatResponse {
-  conversation_id: string;
-  message_id: string;
+  /** null when the response is from a standalone /query call (not persisted) */
+  conversation_id: string | null;
+  /** null when the response is from a standalone /query call (not persisted) */
+  message_id: string | null;
   status: "success" | "error";
   response_type: string;
   answer: string;
@@ -220,12 +224,16 @@ export interface QueryResponse {
 
 export interface HealthResponse {
   status: "healthy" | "degraded" | "unhealthy" | string;
+  /** Field names match ServiceStatus in src/api/schemas/responses.py */
   services: {
-    database: string;
+    api: string;
+    /** Supabase Postgres connection status */
+    supabase_postgres: string;
+    neo4j: string;
+    ai_engine: string;
     llm_server: string;
     embedding_server: string;
     lightrag: string;
-    api: string;
   };
   version: string;
 }

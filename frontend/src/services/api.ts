@@ -44,17 +44,19 @@ interface RequestOptions {
   body?: unknown;
   /** If false, skip attaching the Authorization header (e.g. health check). */
   authenticated?: boolean;
+  /** Use a known fresh Supabase access token instead of reading session again. */
+  accessToken?: string;
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, authenticated = true } = options;
+  const { method = "GET", body, authenticated = true, accessToken } = options;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 
   if (authenticated) {
-    const token = await getAccessToken();
+    const token = accessToken ?? await getAccessToken();
     if (!token) {
       // Caller should handle navigation; throw a typed 401.
       const err = {
@@ -159,8 +161,8 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 /** GET /api/v1/me — requires valid Supabase session */
-export async function getMe(): Promise<CurrentUserResponse> {
-  return request<CurrentUserResponse>("/api/v1/me");
+export async function getMe(accessToken?: string): Promise<CurrentUserResponse> {
+  return request<CurrentUserResponse>("/api/v1/me", { accessToken });
 }
 
 /** GET /api/v1/conversations */
@@ -301,14 +303,18 @@ export async function submitFeedback(
   });
 }
 
-// ── Legacy (existing /api/v1/query endpoint kept for backward compat) ─────────
+// ── Legacy (/api/v1/query — standalone, no conversation context) ──────────────
 
-/** POST /api/v1/query — legacy unauthenticated endpoint */
+/**
+ * POST /api/v1/query — standalone query without conversation.
+ * Requires authentication in new backend (src/api/routers/query.py).
+ * For the primary chat flow use sendMessageStream() instead.
+ */
 export async function queryMedical(payload: QueryRequest): Promise<QueryResponse> {
   return request<QueryResponse>("/api/v1/query", {
     method: "POST",
     body: payload,
-    authenticated: false,
+    // authenticated: true (default) — backend now requires Supabase JWT
   });
 }
 
