@@ -12,6 +12,14 @@ Public API:
 
 from use_cases.answer_question import AnswerQuestionUseCase, AIServiceResult
 from use_cases.answer_question_stream import AnswerQuestionStreamUseCase
+from use_cases.conversation_workflow import (
+    ConversationAnswerResult,
+    ExportConversationUseCase,
+    ExportedConversation,
+    SendConversationMessageUseCase,
+    StreamConversationMessageUseCase,
+    StreamUseCaseEvent,
+)
 from use_cases.manage_conversation import ManageConversationUseCase
 from use_cases.manage_feedback import ManageFeedbackUseCase, FeedbackInput, FeedbackOutput
 from use_cases.explore_knowledge import ExploreKnowledgeUseCase, DiseaseListResult
@@ -22,6 +30,12 @@ __all__ = [
     "AnswerQuestionUseCase",
     "AnswerQuestionStreamUseCase",
     "AIServiceResult",
+    "ConversationAnswerResult",
+    "ExportConversationUseCase",
+    "ExportedConversation",
+    "SendConversationMessageUseCase",
+    "StreamConversationMessageUseCase",
+    "StreamUseCaseEvent",
     "ManageConversationUseCase",
     "ManageFeedbackUseCase",
     "FeedbackInput",
