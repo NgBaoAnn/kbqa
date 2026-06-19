@@ -62,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthError(null);
 
     try {
-      const profile = await getMe();
+      const profile = await getMe(currentSession.access_token);
       setUser(profile);
       setStatus("authenticated");
     } catch (err: unknown) {
@@ -74,6 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus("unauthenticated");
         setSession(null);
         setUser(null);
+        setAuthError(null);
+        void supabaseSignOut();
       } else {
         // Backend unavailable — still mark authenticated so user can retry.
         // Provide a degraded experience rather than blocking login.

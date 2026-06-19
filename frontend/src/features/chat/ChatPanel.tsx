@@ -320,7 +320,7 @@ function AssistantMsg({ response, time, onComposerFill }: AssistantMsgProps) {
 
         {/* Sprint 1: Version metadata badges + trace panel */}
         <VersionBadges
-          messageId={response.message_id}
+          messageId={response.message_id ?? ""}
           metadata={response.metadata as unknown as Record<string, unknown>}
         />
 
@@ -340,7 +340,7 @@ function AssistantMsg({ response, time, onComposerFill }: AssistantMsgProps) {
           </div>
 
           {/* Feedback controls */}
-          <FeedbackControls messageId={response.message_id} initialFeedback={response.feedback} />
+          <FeedbackControls messageId={response.message_id ?? ""} initialFeedback={response.feedback} />
         </div>
       </div>
     </div>
@@ -510,10 +510,12 @@ export function ChatPanel({ conversation }: ChatPanelProps) {
       return [
         ...withoutPending,
         {
-          kind: "record",
+          kind: "record" as const,
           data: {
-            id: response.message_id,
-            role: "assistant",
+            // message_id can be null for standalone /query; ChatPanel only
+            // uses the conversation flow so this will always be a real UUID.
+            id: response.message_id ?? "",
+            role: "assistant" as const,
             content: response.answer,
             response_type: response.response_type,
             data: response.data ?? null,
