@@ -18,6 +18,10 @@ from api.routers.health import router as health_router
 from api.routers.query import router as query_router
 from api.streaming_chat import build_message_stream_events
 from use_cases.answer_question import AIServiceResult
+from use_cases.conversation_workflow import (
+    SendConversationMessageUseCase,
+    StreamConversationMessageUseCase,
+)
 from use_cases.manage_conversation import ManageConversationUseCase
 from use_cases.manage_feedback import ManageFeedbackUseCase
 from use_cases.manage_preferences import ManagePreferencesUseCase
@@ -83,6 +87,12 @@ class _StreamingUseCase:
 
 
 class _FailingPersistConversation:
+    def ensure_owner(self, *, user_id, conversation_id):
+        return True
+
+    def persist_user_message(self, *, conversation_id, question, mode=None):
+        return None
+
     def persist_assistant_response(self, *, conversation_id, question, ai_result):
         raise RuntimeError("db down")
 
@@ -163,6 +173,11 @@ def test_conversation_stream_event_sequence_contains_metadata_and_final_data() -
     container = SimpleNamespace(
         db=db,
         answer_question_stream=_StreamingUseCase(),
+        stream_conversation_message=StreamConversationMessageUseCase(
+            manage_conversation=manage_conversation,
+            manage_preferences=ManagePreferencesUseCase(db=db),
+            answer_question_stream=_StreamingUseCase(),
+        ),
         manage_conversation=manage_conversation,
         manage_preferences=ManagePreferencesUseCase(db=db),
         version_metadata={
@@ -192,19 +207,55 @@ def test_conversation_stream_event_sequence_contains_metadata_and_final_data() -
     assert "\"persisted\":true" in text
 
 
+def test_conversation_message_endpoint_uses_send_workflow() -> None:
+    db = InMemoryDatabaseRepository()
+    manage_conversation = ManageConversationUseCase(
+        db=db,
+        version_metadata={"pipeline_version": "pipe1"},
+    )
+    manage_preferences = ManagePreferencesUseCase(db=db)
+    conv = manage_conversation.create_conversation(user_id="user-1", title="Chat")
+    container = SimpleNamespace(
+        send_conversation_message=SendConversationMessageUseCase(
+            manage_conversation=manage_conversation,
+            manage_preferences=manage_preferences,
+            answer_question=_QuerySuccessUseCase(),
+        ),
+    )
+    client = TestClient(_app_with_container(container, conversations_router))
+
+    response = client.post(
+        f"/api/v1/conversations/{conv['id']}/messages",
+        json={"question": "Xin chào"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["conversation_id"] == conv["id"]
+    assert body["message_id"]
+    assert body["metadata"]["persisted"] is True
+    assert body["metadata"]["pipeline_version"] == "pipe1"
+
+
 def test_stream_presenter_persist_failure_emits_error_without_final_success() -> None:
     async def _collect() -> str:
-        events = []
-        async for event in build_message_stream_events(
+        db = InMemoryDatabaseRepository()
+        stream_uc = StreamConversationMessageUseCase(
+            manage_conversation=_FailingPersistConversation(),
+            manage_preferences=ManagePreferencesUseCase(db=db),
+            answer_question_stream=_StreamingUseCase(),
+        )
+        events = stream_uc.start(
+            user_id="user-1",
             conversation_id="conv-1",
             question="Xin chào",
             mode=None,
-            preferences=None,
-            answer_question_stream=_StreamingUseCase(),
-            manage_conversation=_FailingPersistConversation(),
-        ):
-            events.append(event)
-        return "".join(events)
+        )
+        assert events is not None
+        sse_events = []
+        async for event in build_message_stream_events(events):
+            sse_events.append(event)
+        return "".join(sse_events)
 
     text = asyncio.run(_collect())
 

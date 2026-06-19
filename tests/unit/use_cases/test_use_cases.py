@@ -358,6 +358,14 @@ class TestLlmIntentExtractor:
 
 
 class TestCypherQaEngine:
+    def test_synthesis_prompt_keeps_legacy_rules_and_examples(self):
+        from use_cases.cypher_qa_engine import SYNTHESIS_SYSTEM_PROMPT
+
+        assert "<core_principle>" in SYNTHESIS_SYSTEM_PROMPT
+        assert "TUYỆT ĐỐI KHÔNG bịa thêm" in SYNTHESIS_SYSTEM_PROMPT
+        assert "User: ho gà có triệu chứng gì?" in SYNTHESIS_SYSTEM_PROMPT
+        assert "User: nguyên nhân gây ra bệnh tiểu đường?" in SYNTHESIS_SYSTEM_PROMPT
+
     @pytest.mark.asyncio
     async def test_template_path_executes_and_synthesizes(self):
         from use_cases.cypher_qa_engine import CypherQaEngine
