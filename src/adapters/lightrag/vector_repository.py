@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from ports.vector import IVectorRepository
+from prompts.loader import load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,8 @@ Bạn là trợ lý y tế AegisHealth. Nhiệm vụ của bạn là trả lời
 ---Context---
 """
 
-_MEDICAL_USER_PROMPT = "Luôn trả lời bằng tiếng Việt. Không đề xuất liều lượng thuốc."
+# Loaded from src/prompts/medical_user.md at import time.
+_MEDICAL_USER_PROMPT: str = load_prompt("medical_user")
 
 
 def _patch_lightrag_prompts() -> None:
