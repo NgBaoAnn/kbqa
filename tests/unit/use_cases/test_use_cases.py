@@ -434,18 +434,18 @@ class TestCypherQaEngine:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Domain QA Pipeline (unit — pure logic)
+# Application QA Pipeline (unit — in-memory ports)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestQAPipeline:
-    """Tests for domain QA pipeline with in-memory adapters."""
+    """Tests for application QA pipeline with in-memory adapters."""
 
     def setup_method(self):
-        from domain.qa.pipeline import QAPipeline
+        from use_cases.qa_pipeline import ApplicationQAPipeline
         self.graph = InMemoryGraphRepository()
         self.vector = InMemoryVectorRepository()
         self.llm = InMemoryLlmProvider()
-        self.pipeline = QAPipeline(
+        self.pipeline = ApplicationQAPipeline(
             graph=self.graph,
             vector=self.vector,
             llm=self.llm,

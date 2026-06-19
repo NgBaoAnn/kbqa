@@ -16,6 +16,7 @@ from api.routers.conversations import router as conversations_router
 from api.routers.feedback import router as feedback_router
 from api.routers.health import router as health_router
 from api.routers.query import router as query_router
+from api.routers.schema import router as schema_router
 from api.streaming_chat import build_message_stream_events
 from use_cases.answer_question import AIServiceResult
 from use_cases.conversation_workflow import (
@@ -25,6 +26,8 @@ from use_cases.conversation_workflow import (
 from use_cases.manage_conversation import ManageConversationUseCase
 from use_cases.manage_feedback import ManageFeedbackUseCase
 from use_cases.manage_preferences import ManagePreferencesUseCase
+from use_cases.explore_knowledge import ExploreKnowledgeUseCase
+from use_cases.system_health import SystemHealthUseCase
 
 
 def _user() -> CurrentUser:
@@ -133,10 +136,16 @@ def test_query_standalone_returns_explicit_unpersisted_contract() -> None:
 
 
 def test_health_uses_legacy_shape_and_service_keys() -> None:
+    graph = InMemoryGraphRepository()
+    vector = InMemoryVectorRepository()
+    db = InMemoryDatabaseRepository()
     container = SimpleNamespace(
-        graph=InMemoryGraphRepository(),
-        vector=InMemoryVectorRepository(),
-        db=InMemoryDatabaseRepository(),
+        system_health=SystemHealthUseCase(
+            graph=graph,
+            vector=vector,
+            db=db,
+            pipeline_version="test-pipeline",
+        ),
         version_metadata={"pipeline_version": "test-pipeline"},
     )
     client = TestClient(_app_with_container(container, health_router))
@@ -156,6 +165,19 @@ def test_health_uses_legacy_shape_and_service_keys() -> None:
         "embedding_server",
         "lightrag",
     }
+
+
+def test_schema_endpoint_delegates_to_knowledge_use_case() -> None:
+    graph = InMemoryGraphRepository()
+    container = SimpleNamespace(
+        explore_knowledge=ExploreKnowledgeUseCase(graph=graph),
+    )
+    client = TestClient(_app_with_container(container, schema_router))
+
+    response = client.get("/api/v1/schema")
+
+    assert response.status_code == 200
+    assert set(response.json()) == {"nodes", "relationships"}
 
 
 def test_conversation_stream_event_sequence_contains_metadata_and_final_data() -> None:
