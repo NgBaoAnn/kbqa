@@ -1,7 +1,7 @@
 """AnswerQuestionUseCase — Main QA use case.
 
 Orchestrates the full question-answering flow:
-1. Run QAPipeline (domain logic).
+1. Run ApplicationQAPipeline (application orchestration + domain routing).
 2. Apply safety policy.
 3. Normalize sources.
 4. Generate suggested questions.
@@ -17,7 +17,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from domain.qa.pipeline import QAPipeline, PipelineResult, MSG_TIMEOUT, MSG_SYSTEM_ERROR
+from domain.qa.pipeline import PipelineResult, MSG_TIMEOUT, MSG_SYSTEM_ERROR
+from use_cases.qa_pipeline import ApplicationQAPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class AnswerQuestionUseCase:
         disable_cypher_path: bool = False,
         default_lightrag_mode: str = "naive",
     ) -> None:
-        self._pipeline = QAPipeline(
+        self._pipeline = ApplicationQAPipeline(
             graph=graph,
             vector=vector,
             llm=llm,

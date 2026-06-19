@@ -17,10 +17,9 @@ from collections.abc import AsyncIterator, Callable, Awaitable
 from typing import Any
 
 from use_cases.answer_question import AIServiceResult, AnswerQuestionUseCase
-from domain.qa.pipeline import (
-    QAPipeline, MSG_TIMEOUT, MSG_SYSTEM_ERROR, ENGINE_LIGHTRAG,
-)
+from domain.qa.pipeline import MSG_TIMEOUT, MSG_SYSTEM_ERROR, ENGINE_LIGHTRAG
 from domain.qa.response_formatter import format_lightrag_response
+from use_cases.qa_pipeline import ApplicationQAPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +98,7 @@ class AnswerQuestionStreamUseCase:
         start: float,
     ) -> AIServiceResult:
         """Internal: run with LightRAG native streaming on the LightRAG path."""
-        pipeline = QAPipeline(
+        pipeline = ApplicationQAPipeline(
             graph=self._graph,
             vector=self._vector,
             llm=self._llm,

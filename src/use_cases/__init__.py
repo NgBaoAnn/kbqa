@@ -25,6 +25,8 @@ from use_cases.manage_feedback import ManageFeedbackUseCase, FeedbackInput, Feed
 from use_cases.explore_knowledge import ExploreKnowledgeUseCase, DiseaseListResult
 from use_cases.manage_preferences import ManagePreferencesUseCase
 from use_cases.admin_analytics import AdminAnalyticsUseCase, AdminMetrics, ReviewQueueResult
+from use_cases.qa_pipeline import ApplicationQAPipeline
+from use_cases.system_health import SystemHealthUseCase, SystemHealthResult
 
 __all__ = [
     "AnswerQuestionUseCase",
@@ -46,4 +48,7 @@ __all__ = [
     "AdminAnalyticsUseCase",
     "AdminMetrics",
     "ReviewQueueResult",
+    "ApplicationQAPipeline",
+    "SystemHealthUseCase",
+    "SystemHealthResult",
 ]
