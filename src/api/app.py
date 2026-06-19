@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application startup / shutdown lifecycle manager."""
     logger.info("🚀 AegisHealth KBQA Backend starting…")
+    logger.info("   Engine: Hybrid (LightRAG + Cypher)")
+    logger.info("   LightRAG default mode: %s", settings.default_query_mode)
+    logger.info("   Cypher path disabled: %s", settings.disable_cypher_path)
     logger.info("   Rate limit: %d req/min on /api/v1/query", settings.rate_limit_per_minute)
 
     # Build DI container (wires all adapters and use cases)

@@ -35,6 +35,11 @@ from ports.vector import IVectorRepository
 from use_cases.admin_analytics import AdminAnalyticsUseCase
 from use_cases.answer_question import AnswerQuestionUseCase
 from use_cases.answer_question_stream import AnswerQuestionStreamUseCase
+from use_cases.conversation_workflow import (
+    ExportConversationUseCase,
+    SendConversationMessageUseCase,
+    StreamConversationMessageUseCase,
+)
 from use_cases.explore_knowledge import ExploreKnowledgeUseCase
 from use_cases.manage_conversation import ManageConversationUseCase
 from use_cases.manage_feedback import ManageFeedbackUseCase
@@ -62,6 +67,9 @@ class AppContainer:
     # Pre-built use cases (avoid re-instantiation per request)
     answer_question: AnswerQuestionUseCase
     answer_question_stream: AnswerQuestionStreamUseCase
+    send_conversation_message: SendConversationMessageUseCase
+    stream_conversation_message: StreamConversationMessageUseCase
+    export_conversation: ExportConversationUseCase
     manage_conversation: ManageConversationUseCase
     manage_feedback: ManageFeedbackUseCase
     explore_knowledge: ExploreKnowledgeUseCase
@@ -73,8 +81,9 @@ class AppContainer:
     async def create(cls, settings: Settings = default_settings) -> "AppContainer":
         """Build and warm-up all adapters from the provided Settings.
 
-        By default this only constructs adapters. Expensive connectivity checks
-        stay lazy so startup matches the legacy backend behavior.
+        LightRAG is pre-warmed like the legacy backend so the first user query
+        does not pay storage initialization cost. External infra failures are
+        logged and deferred to request time to keep startup available.
         """
         from adapters.neo4j.graph_repository import Neo4jGraphRepository
         from adapters.supabase.database_repository import SupabaseDatabaseRepository
@@ -102,6 +111,7 @@ class AppContainer:
         auth = SupabaseAuthProvider(
             jwt_secret=settings.supabase_jwt_secret,
             db=db,
+            supabase_url=settings.supabase_url,
         )
 
         # ── LLM (Ollama) ──────────────────────────────────────────────────
@@ -137,6 +147,12 @@ class AppContainer:
             default_query_mode=settings.default_query_mode,
             llm_timeout_seconds=settings.llm_timeout_seconds,
         )
+        try:
+            logger.info("Pre-warming LightRAG adapter...")
+            await vector.warmup()
+        except Exception as exc:
+            logger.warning("LightRAG pre-warm failed; initialization deferred: %s", exc)
+
         intent_extractor = LlmIntentExtractor(llm=llm)
         cypher_engine = CypherQaEngine(llm=llm)
 
@@ -172,6 +188,19 @@ class AppContainer:
         manage_feedback = ManageFeedbackUseCase(db=db)
         explore_knowledge = ExploreKnowledgeUseCase(graph=graph)
         manage_preferences = ManagePreferencesUseCase(db=db)
+        send_conversation_message = SendConversationMessageUseCase(
+            manage_conversation=manage_conversation,
+            manage_preferences=manage_preferences,
+            answer_question=answer_question,
+        )
+        stream_conversation_message = StreamConversationMessageUseCase(
+            manage_conversation=manage_conversation,
+            manage_preferences=manage_preferences,
+            answer_question_stream=answer_question_stream,
+        )
+        export_conversation = ExportConversationUseCase(
+            manage_conversation=manage_conversation,
+        )
         admin_analytics = AdminAnalyticsUseCase(db=db)
 
         logger.info("AppContainer ready.")
@@ -186,6 +215,9 @@ class AppContainer:
             cypher_engine=cypher_engine,
             answer_question=answer_question,
             answer_question_stream=answer_question_stream,
+            send_conversation_message=send_conversation_message,
+            stream_conversation_message=stream_conversation_message,
+            export_conversation=export_conversation,
             manage_conversation=manage_conversation,
             manage_feedback=manage_feedback,
             explore_knowledge=explore_knowledge,
