@@ -21,18 +21,6 @@ from api.schemas.responses import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["query"])
 
-# Error code → HTTP status (spec: 05_API_SYSTEM_DESIGN.md §4.2)
-_ERROR_HTTP: dict[str, int] = {
-    "INVALID_QUESTION": 400,
-    "CYPHER_GENERATION_FAILED": 422,
-    "LIGHTRAG_QUERY_FAILED": 500,
-    "NO_DATA_FOUND": 404,
-    "DATABASE_ERROR": 500,
-    "MODEL_UNAVAILABLE": 503,
-    "TIMEOUT": 504,
-}
-
-
 @router.post(
     "/query",
     response_model=ChatResponse,
@@ -57,25 +45,20 @@ async def query_medical(
 ) -> ChatResponse:
     """Execute a medical QA query without creating a conversation record."""
     container = request.app.state.container
-
-    # Load preferences
-    from use_cases.manage_preferences import ManagePreferencesUseCase
-    prefs_uc = ManagePreferencesUseCase(db=container.db)
-    preferences = prefs_uc.get_preferences(user_id=current_user.id)
-
-    # Execute QA use case
+    preferences = container.manage_preferences.get_preferences(user_id=current_user.id)
     result = await container.answer_question.execute(
         question=payload.question,
         mode=payload.mode,
         preferences=preferences,
     )
 
-    # Map error_code → HTTP status (spec: 05_API_SYSTEM_DESIGN.md §4.2)
     error_code = (result.metadata or {}).get("error_code")
-    if error_code and error_code in _ERROR_HTTP:
+    if error_code:
+        from api.error_mapping import http_status_for_error
         from fastapi import HTTPException
+
         raise HTTPException(
-            status_code=_ERROR_HTTP[error_code],
+            status_code=http_status_for_error(error_code),
             detail={"error_code": error_code, "message": result.answer},
         )
 

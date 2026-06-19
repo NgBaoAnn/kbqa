@@ -179,39 +179,20 @@ async def create_message(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ChatResponse:
     container = request.app.state.container
-    conv_uc = container.manage_conversation
-    preferences = container.manage_preferences.get_preferences(user_id=current_user.id)
-
-    # Verify ownership
-    if not conv_uc.ensure_owner(user_id=current_user.id, conversation_id=conversation_id):
+    outcome = await container.send_conversation_message.execute(
+        user_id=current_user.id,
+        conversation_id=conversation_id,
+        question=payload.question,
+        mode=payload.mode,
+    )
+    if outcome is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
 
-    # Save user message
-    conv_uc.persist_user_message(
-        conversation_id=conversation_id,
-        question=payload.question,
-        mode=payload.mode,
-    )
-
-    # Execute QA
-    result = await container.answer_question.execute(
-        question=payload.question,
-        mode=payload.mode,
-        preferences=preferences,
-    )
-
-    # Persist assistant response (includes sources + query log in one transaction)
-    persisted = conv_uc.persist_assistant_response(
-        conversation_id=conversation_id,
-        question=payload.question,
-        ai_result=result,
-    )
-
     return _result_to_chat_response(
-        result,
+        outcome.ai_result,
         conversation_id=conversation_id,
-        message_id=persisted["message_id"],
-        metadata_override=persisted["metadata"],
+        message_id=outcome.persisted["message_id"],
+        metadata_override=outcome.persisted["metadata"],
     )
 
 
@@ -228,28 +209,17 @@ async def create_message_stream(
 ):
     """Stream assistant response using Server-Sent Events."""
     container = request.app.state.container
-    conv_uc = container.manage_conversation
-    preferences = container.manage_preferences.get_preferences(user_id=current_user.id)
-
-    if not conv_uc.ensure_owner(user_id=current_user.id, conversation_id=conversation_id):
-        raise HTTPException(status_code=404, detail="Conversation not found.")
-
-    # Save user message eagerly before streaming starts
-    conv_uc.persist_user_message(
+    events = container.stream_conversation_message.start(
+        user_id=current_user.id,
         conversation_id=conversation_id,
         question=payload.question,
         mode=payload.mode,
     )
+    if events is None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
 
     return StreamingResponse(
-        build_message_stream_events(
-            conversation_id=conversation_id,
-            question=payload.question,
-            mode=payload.mode,
-            preferences=preferences,
-            answer_question_stream=container.answer_question_stream,
-            manage_conversation=conv_uc,
-        ),
+        build_message_stream_events(events),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -271,24 +241,18 @@ async def export_conversation(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Export a conversation as Markdown (default) or PDF."""
-    uc = request.app.state.container.manage_conversation
-    data = uc.get_conversation(user_id=current_user.id, conversation_id=conversation_id)
-    if data is None:
-        raise HTTPException(status_code=404, detail="Conversation not found.")
-
     if export_format == "markdown":
-        conv = data["conversation"]
-        lines = [f"# {conv.get('title', 'Conversation')}\n"]
-        for m in data.get("messages", []):
-            role = "**User**" if m["role"] == "user" else "**Assistant**"
-            lines.append(f"{role}: {m['content']}\n")
-        content = "\n".join(lines).encode("utf-8")
-        filename = f"conversation-{conversation_id[:8]}.md"
+        exported = request.app.state.container.export_conversation.markdown(
+            user_id=current_user.id,
+            conversation_id=conversation_id,
+        )
+        if exported is None:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
         return Response(
-            content=content,
-            media_type="text/markdown",
+            content=exported.content,
+            media_type=exported.media_type,
             headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Disposition": f'attachment; filename="{exported.filename}"',
                 "Cache-Control": "no-store",
             },
         )
