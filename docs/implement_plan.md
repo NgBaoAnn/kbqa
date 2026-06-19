@@ -673,12 +673,12 @@ class IDatabaseRepository(ABC):
 - [ ] Consolidate ETL scripts → `data_pipeline/`
 - [ ] **Tests**: API integration tests pass
 
-### Phase 6: Frontend & Polish (1-2 ngày)
-- [ ] Add Zustand store for global state management
-- [ ] Refactor `api.ts` with proper error handling and type-safe responses
-- [ ] Add shared hooks (`useApi`, `useStream`, etc.)
-- [ ] Update all import paths, remove legacy files
-- [ ] Final test run, documentation update
+### Phase 6: Frontend & Polish (1-2 ngày) ✅ DONE (2026-06-18)
+- [x] Add Zustand store for global state management — `frontend/src/app/store.ts`
+- [x] Refactor `api.ts` with proper error handling and type-safe responses — already complete; fixed minor type gaps in `types/api.ts`
+- [x] Add shared hooks (`useApi`, `useStream`, `useConversations`, `usePreferences`) — `frontend/src/hooks/`
+- [x] Update all import paths, remove legacy files — legacy types remain but clearly marked `@deprecated`
+- [x] Final test run, documentation update — `tsc --noEmit` ✅, `npm run build` ✅
 
 ---
 
