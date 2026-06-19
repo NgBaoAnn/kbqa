@@ -367,7 +367,12 @@ class QAPipeline:
 
         if not result.get("success"):
             error_msg = result.get("error", "Unknown error")
-            logger.error("LightRAG query failed: %s", error_msg)
+            logger.error(
+                "LightRAG path failed in %.0fms (mode=%s): %s",
+                elapsed_ms,
+                mode or self._default_mode,
+                error_msg,
+            )
             if "not installed" in error_msg.lower():
                 code, msg = "MODEL_UNAVAILABLE", MSG_MODEL_UNAVAILABLE
             elif "invalid query mode" in error_msg.lower():
@@ -392,6 +397,15 @@ class QAPipeline:
         for key in ("entities", "relationships", "chunks"):
             if result.get(key):
                 metadata[key] = result[key]
+
+        logger.info(
+            "LightRAG path completed in %.0fms (type=%s, mode=%s, answer_length=%d, data_count=%d)",
+            elapsed_ms,
+            formatted["response_type"],
+            effective_mode,
+            len(formatted["answer"]),
+            len(formatted.get("data") or []),
+        )
 
         return PipelineResult(
             status="success",

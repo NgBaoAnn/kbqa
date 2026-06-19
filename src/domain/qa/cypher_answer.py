@@ -82,7 +82,8 @@ TRAILING_JUNK_CONTAINS = re.compile(
 def prepare_records_for_llm(records: list[dict]) -> tuple[str, str]:
     """Truncate, localize, and structure graph records for LLM synthesis."""
     original_count = len(records)
-    localized = [_localize_record(record) for record in records[:MAX_RECORDS]]
+    truncated = records[:MAX_RECORDS]
+    localized = [_localize_record(record) for record in truncated]
     localized = [record for record in localized if record]
 
     while len(json.dumps(localized, ensure_ascii=False)) > MAX_PAYLOAD_CHARS:
@@ -98,7 +99,7 @@ def prepare_records_for_llm(records: list[dict]) -> tuple[str, str]:
             break
 
     note = (
-        f"(Hiển thị {len(localized)}/{original_count} kết quả phù hợp nhất)"
+        f"(Hiển thị {len(truncated)}/{original_count} kết quả phù hợp nhất)"
         if original_count > MAX_RECORDS
         else ""
     )
