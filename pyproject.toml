@@ -43,12 +43,12 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["backend*", "data_pipeline*"]
+include = ["src*", "data_pipeline*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-pythonpath = [".", "backend/src"]
+pythonpath = [".", "src"]
 
 [tool.ruff]
 line-length = 100
