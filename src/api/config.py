@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 #   2. backend/.env   (backend-specific overrides)
 #
 # Later files override earlier files.
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _ENV_FILES = [
     _PROJECT_ROOT / ".env",
     _PROJECT_ROOT / "backend" / ".env",
