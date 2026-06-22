@@ -62,7 +62,7 @@ if [ ! -x "$APP_DIR/.venv/bin/python" ]; then
 fi
 
 "$APP_DIR/.venv/bin/python" -m pip install --upgrade pip
-"$APP_DIR/.venv/bin/python" -m pip install -r "$APP_DIR/requirements.txt"
+"$APP_DIR/.venv/bin/python" -m pip install -e "$APP_DIR"
 
 log "building frontend"
 cd "$FRONTEND_DIR"
