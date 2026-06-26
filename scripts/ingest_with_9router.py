@@ -18,8 +18,17 @@ load_dotenv(".env", override=True)
 # Ghi đè cấu hình OpenAI cho 9router
 os.environ["OPENAI_API_BASE"] = os.environ.get("OPENAI_API_BASE", "http://localhost:20128/v1")
 os.environ["OPENAI_BASE_URL"] = os.environ["OPENAI_API_BASE"]
-os.environ["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY", "sk-dummy-key") # Thay bằng key thật của 9router trong file .env
+os.environ["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY", "sk-dummy-key")
 os.environ["LIGHTRAG_WORKSPACE"] = "base" # Namespace mặc định
+
+# --- CẤU HÌNH NEO4J TIMEOUT ĐỂ FIX LỖI "ConnectionAcquisitionTimeoutError" ---
+# Tăng thời gian chờ lấy connection từ 30s lên 300s (5 phút)
+os.environ["NEO4J_CONNECTION_ACQUISITION_TIMEOUT"] = "300.0"
+# Tạm giảm nhẹ pool size để tránh Spam Socket đến Neo4j Aura Cloud Free tier (thường giới hạn ở mức 50-100)
+os.environ["NEO4J_MAX_CONNECTION_POOL_SIZE"] = "50"
+# Tăng thời gian giữ connection
+os.environ["NEO4J_CONNECTION_TIMEOUT"] = "60.0"
+# -------------------------------------------------------------------------
 
 async def main():
     parser = argparse.ArgumentParser(description="Chạy Ingest dữ liệu cho LightRAG")
@@ -28,30 +37,16 @@ async def main():
 
     print("==================================================")
     if args.retry:
-        print("🚀 BẮT ĐẦU QUÁ TRÌNH INGEST - CHẾ ĐỘ RETRY (VÁ LỖI)")
+        print("🚀 BẮT ĐẦU QUÁ TRÌNH INGEST - CHẾ ĐỘ VÁ LỖI (RETRY)")
     else:
-        print("🚀 BẮT ĐẦU QUÁ TRÌNH INGEST VỚI 9ROUTER (LOCAL)")
+        print("🚀 BẮT ĐẦU QUÁ TRÌNH INGEST - LÀM LẠI TỪ ĐẦU")
     print("==================================================\n")
-
-    # Đọc checkpoint trước để quyết định có xóa DB hay không
-    CHECKPOINT_FILE = "ingest_9router_checkpoint.txt"
-    start_index = 0
-    
-    if args.retry:
-        print("🔄 CHẾ ĐỘ RETRY: Sẽ quét lại toàn bộ dữ liệu từ đầu để vá các file FAILED.")
-    elif os.path.exists(CHECKPOINT_FILE):
-        try:
-            with open(CHECKPOINT_FILE, "r") as f:
-                start_index = int(f.read().strip())
-                print(f"🔄 Tìm thấy checkpoint! Tiếp tục nạp từ index: {start_index}")
-        except Exception:
-            pass
 
     # ---------------------------------------------------------
     # 1. DỌN DẸP DỮ LIỆU CŨ (CLEANUP)
     # ---------------------------------------------------------
-    if not args.retry and start_index == 0:
-        print("🧹 BƯỚC 1: DỌN DẸP DỮ LIỆU CŨ (Do chạy mới hoàn toàn)...")
+    if not args.retry:
+        print("🧹 BƯỚC 1: DỌN DẸP DỮ LIỆU CŨ (Chạy mới hoàn toàn)...")
         try:
             print("   Đang kết nối Neo4j...")
             driver = GraphDatabase.driver(
@@ -85,7 +80,7 @@ async def main():
             
         print("✨ HOÀN TẤT DỌN DẸP!\n")
     else:
-        print("⏭️ BƯỚC 1: Bỏ qua dọn dẹp Database (An toàn dữ liệu).\n")
+        print("⏭️ BƯỚC 1: Bỏ qua dọn dẹp Database (Chế độ Vá Lỗi).\n")
 
     # ---------------------------------------------------------
     # 2. KHỞI TẠO LIGHTRAG
@@ -162,27 +157,16 @@ async def main():
     # ---------------------------------------------------------
     print("\n🚀 BƯỚC 4: BẮT ĐẦU INGEST VÀO LIGHTRAG...")
     BATCH_SIZE = 25
-
     total_docs = len(documents)
     
     # Dùng tqdm để hiển thị thanh tiến trình
-    pbar = tqdm(range(start_index, total_docs, BATCH_SIZE), desc="Ingesting Batches")
+    pbar = tqdm(range(0, total_docs, BATCH_SIZE), desc="Ingesting Batches")
     
     for i in pbar:
         batch_docs = documents[i : i + BATCH_SIZE]
-        
-        # Đẩy dữ liệu vào LightRAG
         await rag.ainsert(batch_docs)
-        
-        # Chỉ lưu checkpoint khi không ở chế độ retry (vì retry chạy lướt qua toàn bộ)
-        if not args.retry:
-            with open(CHECKPOINT_FILE, "w") as f:
-                f.write(str(i + BATCH_SIZE))
             
     print("\n🎉 XONG! Dữ liệu đã đồng bộ hoàn hảo với hệ thống.")
-    if not args.retry and os.path.exists(CHECKPOINT_FILE):
-        os.remove(CHECKPOINT_FILE)
 
 if __name__ == "__main__":
-    # Khởi chạy luồng chính
     asyncio.run(main())
