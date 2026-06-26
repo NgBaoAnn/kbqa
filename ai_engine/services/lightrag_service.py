@@ -190,11 +190,9 @@ async def _create_lightrag_instance():
         embedding_dim=EMBEDDING_DIM,
         max_token_size=8192,
         func=embedding_func,
-        # NOTE: model_name is intentionally left absent here so the Qdrant
-        # collection name stays «lightrag_vdb_chunks» (no suffix) — matching
-        # the collection created during ingestion with the same setup.
-        # If you want suffix isolation, set model_name=EMBEDDING_MODEL here
-        # AND re-run the ingestion script to rebuild the collection.
+        model_name=EMBEDDING_MODEL,
+        # NOTE: model_name is set so Qdrant collection name gets suffix 
+        # (e.g. lightrag_vdb_chunks_bge_m3_1024d) matching the ingested data.
     )
 
     # Configure Neo4j env vars before LightRAG reads them
