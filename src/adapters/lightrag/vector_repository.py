@@ -74,7 +74,7 @@ class LightragVectorRepository(IVectorRepository):
         llm_base_url: OpenAI-compatible LLM server base URL.
         llm_model_name: LLM model name (e.g. 'qwen2.5:14b').
         embedding_base_url: OpenAI-compatible embedding server base URL.
-        embedding_model: Embedding model name (e.g. 'BAAI/bge-m3').
+        embedding_model: Embedding model name (e.g. 'bge-m3').
         embedding_dim: Embedding vector dimension (e.g. 1024).
         kg_storage: LightRAG KG storage backend (e.g. 'Neo4JStorage').
         vector_storage: LightRAG vector storage backend (e.g. 'NanoVectorDBStorage').
@@ -94,7 +94,7 @@ class LightragVectorRepository(IVectorRepository):
         llm_base_url: str = "http://localhost:11434/v1",
         llm_model_name: str = "qwen2.5:14b",
         embedding_base_url: str = "http://localhost:11434/v1",
-        embedding_model: str = "BAAI/bge-m3",
+        embedding_model: str = "bge-m3",
         embedding_dim: int = 1024,
         kg_storage: str = "Neo4JStorage",
         vector_storage: str = "NanoVectorDBStorage",
@@ -359,6 +359,7 @@ class LightragVectorRepository(IVectorRepository):
             embedding_dim=self._embedding_dim,
             max_token_size=8192,
             func=self._embedding_func,
+            model_name=self._embedding_model,
         )
 
         # Set Neo4j env vars when using Neo4JStorage

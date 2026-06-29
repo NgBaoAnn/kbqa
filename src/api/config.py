@@ -87,7 +87,7 @@ class Settings:
 
     # ── Embedding ────────────────────────────────────────────────────────
     embedding_model: str = field(
-        default_factory=lambda: os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+        default_factory=lambda: os.getenv("EMBEDDING_MODEL", "bge-m3")
     )
     embedding_dim: int = field(
         default_factory=lambda: int(os.getenv("EMBEDDING_DIM", "1024"))

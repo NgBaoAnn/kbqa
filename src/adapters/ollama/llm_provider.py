@@ -131,7 +131,7 @@ class OllamaEmbeddingProvider(IEmbeddingProvider):
 
     Args:
         base_url: OpenAI-compatible API base URL.
-        model_name: Embedding model (e.g. 'BAAI/bge-m3').
+        model_name: Embedding model (e.g. 'bge-m3').
         embedding_dim: Expected embedding dimension (used for validation).
         timeout_seconds: HTTP request timeout.
     """
@@ -140,7 +140,7 @@ class OllamaEmbeddingProvider(IEmbeddingProvider):
         self,
         *,
         base_url: str = "http://localhost:11434/v1",
-        model_name: str = "BAAI/bge-m3",
+        model_name: str = "bge-m3",
         embedding_dim: int = 1024,
         timeout_seconds: int = 60,
     ) -> None:
