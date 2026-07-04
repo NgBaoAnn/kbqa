@@ -3,7 +3,7 @@ name: Deploy to EC2
 on:
   push:
     branches:
-      - develop
+      - dev
   workflow_dispatch:
 
 concurrency:
@@ -57,7 +57,7 @@ jobs:
           port="${AWS_EC2_PORT:-22}"
           user="${AWS_EC2_USER:-ubuntu}"
           app_dir="${AWS_EC2_APP_DIR:-/home/ubuntu/kbqa}"
-          deploy_branch="${AWS_EC2_DEPLOY_BRANCH:-develop}"
+          deploy_branch="${AWS_EC2_DEPLOY_BRANCH:-dev}"
 
           ssh -i "$HOME/.ssh/kbqa_ec2_key" -p "$port" "$user@$host" \
             "set -Eeuo pipefail; cd '$app_dir'; git fetch origin '$deploy_branch'; git checkout -B '$deploy_branch' 'origin/$deploy_branch'; git reset --hard 'origin/$deploy_branch'; APP_DIR='$app_dir' DEPLOY_BRANCH='$deploy_branch' bash scripts/deploy_ec2.sh"

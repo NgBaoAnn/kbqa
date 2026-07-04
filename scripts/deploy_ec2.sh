@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_DIR="${APP_DIR:-/home/ubuntu/kbqa}"
-DEPLOY_BRANCH="${DEPLOY_BRANCH:-develop}"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-dev}"
 PYTHON_BIN="${PYTHON_BIN:-python3.11}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-kbqa-backend}"
 NGINX_SERVICE="${NGINX_SERVICE:-nginx}"
