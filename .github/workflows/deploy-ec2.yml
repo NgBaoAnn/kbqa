@@ -3,7 +3,6 @@ name: Deploy to EC2
 on:
   push:
     branches:
-      - main
       - dev
   workflow_dispatch:
 
@@ -58,7 +57,7 @@ jobs:
           port="${AWS_EC2_PORT:-22}"
           user="${AWS_EC2_USER:-ubuntu}"
           app_dir="${AWS_EC2_APP_DIR:-/home/ubuntu/kbqa}"
-          deploy_branch="${AWS_EC2_DEPLOY_BRANCH:-${GITHUB_REF_NAME:-main}}"
+          deploy_branch="${AWS_EC2_DEPLOY_BRANCH:-dev}"
 
           ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i "$HOME/.ssh/kbqa_ec2_key" -p "$port" "$user@$host" \
             "set -Eeuo pipefail
