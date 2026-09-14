@@ -12,6 +12,9 @@ __pycache__/
 
 # Secrets
 .env
+*.pem
+Neo4j-*.txt
+.coverage
 
 # Large datasets (clone separately)
 ai_engine/data/vietmedkg/
@@ -27,3 +30,5 @@ skills-lock.json
 # Logs & Scratch files
 *.log
 scratch_*.py
+
+docs/

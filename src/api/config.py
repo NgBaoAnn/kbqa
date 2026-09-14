@@ -99,6 +99,9 @@ class Settings:
     )
 
     # ── LightRAG ─────────────────────────────────────────────────────────
+    lightrag_enabled: bool = field(
+        default_factory=lambda: os.getenv("LIGHTRAG_ENABLED", "true").lower() == "true"
+    )
     lightrag_working_dir: str = field(
         default_factory=lambda: os.getenv("LIGHTRAG_WORKING_DIR", "./lightrag_data")
     )

@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 APP_DIR="${APP_DIR:-/home/ubuntu/kbqa}"
-DEPLOY_BRANCH="${DEPLOY_BRANCH:-dev}"
-PYTHON_BIN="${PYTHON_BIN:-python3.11}"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-kbqa-backend}"
 NGINX_SERVICE="${NGINX_SERVICE:-nginx}"
 WEB_ROOT="${WEB_ROOT:-/var/www/kbqa}"
@@ -67,7 +67,7 @@ fi
 log "building frontend"
 cd "$FRONTEND_DIR"
 if [ -f package-lock.json ]; then
-  npm ci
+  npm ci || npm install
 else
   npm install
 fi

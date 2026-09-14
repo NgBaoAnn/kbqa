@@ -131,29 +131,40 @@ class AppContainer:
             timeout_seconds=settings.llm_timeout_seconds,
         )
 
-        # ── Vector (LightRAG + Qdrant) ────────────────────────────────────
-        vector = LightragVectorRepository(
-            working_dir=settings.lightrag_working_dir,
-            llm_base_url=settings.llm_base_url,
-            llm_model_name=settings.llm_model_name,
-            embedding_base_url=settings.embedding_base_url,
-            embedding_model=settings.embedding_model,
-            embedding_dim=settings.embedding_dim,
-            kg_storage=settings.lightrag_kg_storage,
-            vector_storage=settings.lightrag_vector_storage,
-            doc_storage=settings.lightrag_doc_storage,
-            neo4j_uri=settings.neo4j_uri,
-            neo4j_username=settings.neo4j_username,
-            neo4j_password=settings.neo4j_password,
-            force_naive_mode=settings.force_lightrag_naive_mode,
-            default_query_mode=settings.default_query_mode,
-            llm_timeout_seconds=settings.llm_timeout_seconds,
-        )
-        try:
-            logger.info("Pre-warming LightRAG adapter...")
-            await vector.warmup()
-        except Exception as exc:
-            logger.warning("LightRAG pre-warm failed; initialization deferred: %s", exc)
+        # ── Vector (LightRAG + Qdrant or In-Memory fallback) ──────────────
+        if not settings.lightrag_enabled:
+            from adapters.in_memory.vector_repository import InMemoryVectorRepository
+
+            logger.info("LightRAG is disabled (MVP mode) — using InMemoryVectorRepository")
+            vector = InMemoryVectorRepository()
+            vector.set_default_answer(
+                "Xin lỗi, hiện tại hệ thống đang chạy chế độ MVP chỉ hỗ trợ tra cứu bệnh học, "
+                "triệu chứng, thuốc và phác đồ điều trị qua Cơ sở tri thức (Knowledge Graph). "
+                "Vui lòng đặt câu hỏi cụ thể về một bệnh hoặc triệu chứng."
+            )
+        else:
+            vector = LightragVectorRepository(
+                working_dir=settings.lightrag_working_dir,
+                llm_base_url=settings.llm_base_url,
+                llm_model_name=settings.llm_model_name,
+                embedding_base_url=settings.embedding_base_url,
+                embedding_model=settings.embedding_model,
+                embedding_dim=settings.embedding_dim,
+                kg_storage=settings.lightrag_kg_storage,
+                vector_storage=settings.lightrag_vector_storage,
+                doc_storage=settings.lightrag_doc_storage,
+                neo4j_uri=settings.neo4j_uri,
+                neo4j_username=settings.neo4j_username,
+                neo4j_password=settings.neo4j_password,
+                force_naive_mode=settings.force_lightrag_naive_mode,
+                default_query_mode=settings.default_query_mode,
+                llm_timeout_seconds=settings.llm_timeout_seconds,
+            )
+            try:
+                logger.info("Pre-warming LightRAG adapter...")
+                await vector.warmup()
+            except Exception as exc:
+                logger.warning("LightRAG pre-warm failed; initialization deferred: %s", exc)
 
         intent_extractor = LlmIntentExtractor(llm=llm)
         cypher_engine = CypherQaEngine(llm=llm)

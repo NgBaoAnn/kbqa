@@ -3,6 +3,7 @@ name: Deploy to EC2
 on:
   push:
     branches:
+      - main
       - dev
   workflow_dispatch:
 
@@ -17,7 +18,7 @@ jobs:
   deploy:
     name: Deploy production
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
       - name: Validate required secrets
@@ -57,7 +58,16 @@ jobs:
           port="${AWS_EC2_PORT:-22}"
           user="${AWS_EC2_USER:-ubuntu}"
           app_dir="${AWS_EC2_APP_DIR:-/home/ubuntu/kbqa}"
-          deploy_branch="${AWS_EC2_DEPLOY_BRANCH:-dev}"
+          deploy_branch="${AWS_EC2_DEPLOY_BRANCH:-${GITHUB_REF_NAME:-main}}"
 
           ssh -i "$HOME/.ssh/kbqa_ec2_key" -p "$port" "$user@$host" \
-            "set -Eeuo pipefail; cd '$app_dir'; git fetch origin '$deploy_branch'; git checkout -B '$deploy_branch' 'origin/$deploy_branch'; git reset --hard 'origin/$deploy_branch'; APP_DIR='$app_dir' DEPLOY_BRANCH='$deploy_branch' bash scripts/deploy_ec2.sh"
+            "set -Eeuo pipefail
+             if [ ! -d \"\$app_dir/.git\" ]; then
+               git clone https://github.com/NgBaoAnn/kbqa.git \"\$app_dir\" || true
+             fi
+             cd \"\$app_dir\"
+             git remote set-url origin https://github.com/NgBaoAnn/kbqa.git || true
+             git fetch origin \"\$deploy_branch\"
+             git checkout -B \"\$deploy_branch\" \"origin/\$deploy_branch\"
+             git reset --hard \"origin/\$deploy_branch\"
+             APP_DIR=\"\$app_dir\" DEPLOY_BRANCH=\"\$deploy_branch\" bash scripts/deploy_ec2.sh"
