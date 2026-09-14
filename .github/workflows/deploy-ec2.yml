@@ -68,6 +68,7 @@ jobs:
              cd '$app_dir'
              git remote set-url origin https://github.com/NgBaoAnn/kbqa.git || true
              git fetch origin '$deploy_branch'
+             git reset --hard HEAD || true
              git checkout -B '$deploy_branch' 'origin/$deploy_branch'
              git reset --hard 'origin/$deploy_branch'
              APP_DIR='$app_dir' DEPLOY_BRANCH='$deploy_branch' bash scripts/deploy_ec2.sh"
