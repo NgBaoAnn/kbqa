@@ -62,12 +62,12 @@ jobs:
 
           ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i "$HOME/.ssh/kbqa_ec2_key" -p "$port" "$user@$host" \
             "set -Eeuo pipefail
-             if [ ! -d \"\$app_dir/.git\" ]; then
-               git clone https://github.com/NgBaoAnn/kbqa.git \"\$app_dir\" || true
+             if [ ! -d '$app_dir/.git' ]; then
+               git clone https://github.com/NgBaoAnn/kbqa.git '$app_dir' || true
              fi
-             cd \"\$app_dir\"
+             cd '$app_dir'
              git remote set-url origin https://github.com/NgBaoAnn/kbqa.git || true
-             git fetch origin \"\$deploy_branch\"
-             git checkout -B \"\$deploy_branch\" \"origin/\$deploy_branch\"
-             git reset --hard \"origin/\$deploy_branch\"
-             APP_DIR=\"\$app_dir\" DEPLOY_BRANCH=\"\$deploy_branch\" bash scripts/deploy_ec2.sh"
+             git fetch origin '$deploy_branch'
+             git checkout -B '$deploy_branch' 'origin/$deploy_branch'
+             git reset --hard 'origin/$deploy_branch'
+             APP_DIR='$app_dir' DEPLOY_BRANCH='$deploy_branch' bash scripts/deploy_ec2.sh"
